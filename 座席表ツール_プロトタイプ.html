@@ -1,0 +1,1837 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自動座席表作成ツール — プロトタイプ</title>
+<style>
+:root{
+  --ink:#161d29; --ink2:#4a5972; --ink3:#7c8aa3;
+  --line:#d7dde8; --line2:#eaeef5;
+  --paper:#f4f6fa; --card:#ffffff;
+  --indigo:#20509b; --indigo-d:#173c76; --indigo-t:#e9eefa;
+  --vermilion:#bb3c26; --vermilion-t:#fbeae6;
+  --moss:#46714f; --moss-t:#e9f2ea;
+  --grid:#dfe6f2;
+  --amber:#a86a12; --amber-t:#fbf1de;
+  --r:10px;
+  --jp:"Hiragino Kaku Gothic ProN","Yu Gothic Medium","YuGothic","Noto Sans JP","Meiryo",sans-serif;
+  --mono:ui-monospace,"SFMono-Regular","Menlo","Consolas",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:var(--jp); color:var(--ink); background:var(--paper);
+  font-size:15px; line-height:1.65; -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:none}
+:focus-visible{outline:2.5px solid var(--indigo);outline-offset:2px;border-radius:4px}
+
+/* ---------- 共通パーツ ---------- */
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.btn{
+  display:inline-flex;align-items:center;gap:7px;justify-content:center;
+  min-height:44px;padding:0 18px;border-radius:var(--r);
+  border:1.5px solid var(--line);background:var(--card);
+  font-weight:600;font-size:14.5px;transition:.12s;white-space:nowrap;
+}
+.btn:hover:not(:disabled){border-color:var(--ink3);background:#fbfcfe}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.btn-primary{background:var(--indigo);border-color:var(--indigo);color:#fff}
+.btn-primary:hover:not(:disabled){background:var(--indigo-d);border-color:var(--indigo-d)}
+.btn-danger{color:var(--vermilion);border-color:#e8c4bc}
+.btn-danger:hover:not(:disabled){background:var(--vermilion-t);border-color:var(--vermilion)}
+.btn-sm{min-height:34px;padding:0 12px;font-size:13px;border-radius:7px}
+.btn-lg{min-height:52px;padding:0 26px;font-size:16px}
+.btn.on{background:var(--amber);border-color:var(--amber);color:#fff}
+.btn.on:hover{background:#8f590f;border-color:#8f590f}
+
+.field{display:block;margin-bottom:14px}
+.field > span{display:block;font-size:12.5px;font-weight:700;color:var(--ink2);margin-bottom:5px;letter-spacing:.02em}
+.input,select.input{
+  width:100%;min-height:42px;padding:0 12px;border:1.5px solid var(--line);
+  border-radius:8px;background:var(--card);
+}
+.input:focus{border-color:var(--indigo);outline:none;box-shadow:0 0 0 3px var(--indigo-t)}
+select.input{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--ink2) 50%),linear-gradient(135deg,var(--ink2) 50%,transparent 50%);background-position:calc(100% - 17px) 18px,calc(100% - 12px) 18px;background-size:5px 5px;background-repeat:no-repeat;padding-right:34px}
+
+.chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:99px;font-size:11.5px;font-weight:700;letter-spacing:.02em}
+.chip-i{background:var(--indigo-t);color:var(--indigo-d)}
+.chip-v{background:var(--vermilion-t);color:var(--vermilion)}
+.chip-m{background:var(--moss-t);color:var(--moss)}
+.chip-a{background:var(--amber-t);color:var(--amber)}
+.chip-g{background:#eef1f6;color:var(--ink2)}
+
+.seg{display:inline-flex;border:1.5px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card)}
+.seg button{padding:0 16px;min-height:40px;font-size:14px;font-weight:600;color:var(--ink2);border-right:1.5px solid var(--line)}
+.seg button:last-child{border-right:none}
+.seg button[aria-pressed="true"]{background:var(--indigo);color:#fff}
+
+/* ---------- アプリ骨格 ---------- */
+#app{height:100%;display:flex;flex-direction:column}
+.topbar{
+  flex:0 0 auto;height:58px;display:flex;align-items:center;gap:14px;
+  padding:0 20px;background:var(--card);border-bottom:1.5px solid var(--line);
+}
+.brand{display:flex;align-items:baseline;gap:9px;font-weight:800;letter-spacing:.01em}
+.brand .mark{
+  width:26px;height:26px;border-radius:6px;background:var(--indigo);position:relative;flex:0 0 auto;
+  align-self:center;
+  background-image:linear-gradient(#fff 1.5px,transparent 1.5px),linear-gradient(90deg,#fff 1.5px,transparent 1.5px);
+  background-size:8.5px 8.5px;background-position:4px 4px;
+}
+.crumb{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink2);min-width:0}
+.crumb b{color:var(--ink);font-weight:700}
+.crumb .sep{color:var(--ink3)}
+.spacer{flex:1}
+.view{flex:1;min-height:0;overflow:auto}
+.wrap{max-width:1080px;margin:0 auto;padding:30px 24px 70px}
+
+/* ---------- ホーム ---------- */
+.home-hero{display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap;margin-bottom:22px}
+.home-hero h1{font-size:27px;font-weight:800;letter-spacing:.01em;line-height:1.3}
+.home-hero p{color:var(--ink2);font-size:13.5px;margin-top:3px}
+.searchbar{position:relative;flex:1;min-width:230px}
+.searchbar input{padding-left:38px}
+.searchbar::before{content:"";position:absolute;left:14px;top:14px;width:11px;height:11px;border:2px solid var(--ink3);border-radius:50%}
+.searchbar::after{content:"";position:absolute;left:23px;top:24px;width:7px;height:2px;background:var(--ink3);transform:rotate(45deg)}
+
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(266px,1fr));gap:15px}
+.tcard{
+  position:relative;text-align:left;padding:17px 18px 15px;border:1.5px solid var(--line);
+  border-radius:14px;background:var(--card);transition:.14s;display:block;width:100%;
+}
+.tcard:hover{border-color:var(--indigo);box-shadow:0 6px 20px -10px rgba(32,80,155,.4);transform:translateY(-2px)}
+.tcard .tk{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:9px}
+.tcard h3{font-size:18.5px;font-weight:800;letter-spacing:.01em}
+.tcard .sub{font-size:13px;color:var(--ink2);margin-top:1px}
+.tcard .mini{
+  margin:12px 0 11px;height:74px;border:1px solid var(--line2);border-radius:8px;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:11px 11px;display:grid;gap:3px;padding:8px;place-content:center;
+}
+.tcard .mini i{background:var(--indigo);opacity:.55;border-radius:1.5px;display:block}
+.tcard .meta{display:flex;gap:14px;font-size:11.5px;color:var(--ink3);font-family:var(--mono);border-top:1px solid var(--line2);padding-top:10px}
+.tcard .meta b{color:var(--ink2)}
+.tcard-new{
+  border-style:dashed;border-width:2px;border-color:var(--line);background:transparent;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:210px;
+  font-weight:700;color:var(--ink2);
+}
+.tcard-new:hover{border-color:var(--indigo);color:var(--indigo);background:var(--indigo-t);transform:none;box-shadow:none}
+.tcard-new .plus{font-size:26px;line-height:1;font-weight:400}
+
+.empty{text-align:center;padding:60px 20px;color:var(--ink2)}
+.empty h3{font-size:17px;margin-bottom:6px;color:var(--ink)}
+
+/* ---------- テンプレート詳細 ---------- */
+.tabs{display:flex;gap:2px;border-bottom:1.5px solid var(--line);margin:18px 0 22px;overflow-x:auto}
+.tabs button{
+  padding:11px 17px;font-weight:700;font-size:14.5px;color:var(--ink3);
+  border-bottom:3px solid transparent;margin-bottom:-1.5px;white-space:nowrap;
+}
+.tabs button[aria-selected="true"]{color:var(--indigo);border-bottom-color:var(--indigo)}
+.panel{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:start}
+.box{border:1.5px solid var(--line);border-radius:13px;background:var(--card);padding:19px}
+.box > h3{font-size:15px;font-weight:800;margin-bottom:3px}
+.box > .hint{font-size:12.5px;color:var(--ink3);margin-bottom:14px;line-height:1.5}
+
+table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+table.tbl th{
+  text-align:left;font-size:11px;letter-spacing:.1em;color:var(--ink3);font-family:var(--mono);
+  font-weight:600;padding:6px 8px;border-bottom:1.5px solid var(--line);text-transform:uppercase;
+}
+table.tbl td{padding:7px 8px;border-bottom:1px solid var(--line2)}
+table.tbl tr:hover td{background:#f8fafd}
+.scroller{max-height:340px;overflow:auto;border:1px solid var(--line2);border-radius:9px}
+
+.hist{display:flex;flex-direction:column;gap:9px}
+.hrow{
+  display:flex;align-items:center;gap:13px;padding:12px 14px;border:1.5px solid var(--line);
+  border-radius:11px;background:var(--card);
+}
+.hrow:hover{border-color:var(--indigo)}
+.hrow .date{font-family:var(--mono);font-weight:700;font-size:14px;letter-spacing:-.01em}
+.hrow .when{font-size:11.5px;color:var(--ink3);font-family:var(--mono)}
+
+/* ---------- 座席表エディタ ---------- */
+.ed{display:flex;flex-direction:column;height:100%;min-height:0}
+.toolbar{
+  flex:0 0 auto;display:flex;align-items:center;gap:9px;padding:10px 16px;
+  background:var(--card);border-bottom:1.5px solid var(--line);flex-wrap:wrap;
+}
+.toolbar .div{width:1px;height:26px;background:var(--line);margin:0 3px}
+.tool-note{font-size:12px;color:var(--ink3);font-family:var(--mono)}
+.ed-body{flex:1;min-height:0;display:flex}
+.canvas-pad{
+  flex:1;min-width:0;padding:22px;display:grid;place-items:center;
+  container-type:size;background:
+    radial-gradient(circle at 1px 1px, #dbe1ec 1px, transparent 0) 0 0/22px 22px;
+}
+.sheet{
+  background:#fff;box-shadow:0 3px 26px -8px rgba(22,29,41,.28);
+  border:1px solid var(--line);display:flex;flex-direction:column;
+  padding:var(--pad,16px);position:relative;
+}
+.sheet-head{flex:0 0 auto;display:flex;justify-content:flex-end;margin-bottom:var(--pad,14px)}
+.sheet-head .hd{text-align:right;line-height:1.45}
+.sheet-head .hd .d{font-family:var(--mono);font-weight:700;font-size:var(--fs-hd,13px)}
+.sheet-head .hd .c{font-weight:800;font-size:calc(var(--fs-hd,13px) * 1.16)}
+.sheet-head .hd .t{font-size:var(--fs-hd,13px);color:#333}
+.room{flex:1;min-height:0;position:relative}
+.seatgrid{
+  position:absolute;inset:0;display:grid;
+  gap:var(--gap,8px);align-content:center;justify-content:center;
+}
+.seat{
+  border:1.5px solid var(--ink);border-radius:4px;background:#fff;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  position:relative;overflow:hidden;text-align:center;padding:2px;
+  transition:.1s;width:var(--cw);height:var(--ch);
+}
+.seat .sname{font-weight:700;font-size:var(--fs-name,14px);line-height:1.15;letter-spacing:-.01em;
+  white-space:nowrap;overflow:hidden;max-width:100%;display:inline-block}
+.seat .sromaji{font-family:var(--mono);font-size:var(--fs-sub,8px);color:#555;letter-spacing:.04em;margin-top:1px;
+  white-space:nowrap;overflow:hidden;max-width:100%;display:inline-block}
+.seat .sno{position:absolute;top:1px;left:3px;font-family:var(--mono);font-size:var(--fs-sub,8px);color:#888}
+.seat.empty{border-style:dashed;border-color:#b9c2d2;background:#fdfdfe}
+.seat.off{border:1px dashed #dde2ea;background:repeating-linear-gradient(45deg,#f2f4f8,#f2f4f8 4px,#e9edf3 4px,#e9edf3 8px)}
+.seat.off *{display:none}
+.seat.fixed{box-shadow:inset 0 0 0 2.5px var(--vermilion)}
+.seat .stamp{
+  position:absolute;top:2px;right:2px;font-size:var(--fs-sub,8px);font-weight:800;
+  color:var(--vermilion);border:1.5px solid var(--vermilion);border-radius:3px;padding:0 2px;line-height:1.3;
+}
+.mode-place .seat,.mode-swap .seat{cursor:pointer}
+.mode-place .seat:hover,.mode-swap .seat:hover{border-color:var(--indigo);box-shadow:0 0 0 3px var(--indigo-t)}
+/* タブレットでの交換モード操作を想定し、見た目の座席サイズは変えずタップ領域のみ44px以上を確保する */
+.mode-swap .seat:not(.off)::after{
+  content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:max(100%,44px);height:max(100%,44px);
+}
+.seat.drop{border-color:var(--indigo);background:var(--indigo-t);box-shadow:0 0 0 3px var(--indigo-t)}
+.seat.sel{border-color:var(--amber);box-shadow:0 0 0 3.5px var(--amber-t);background:#fffcf3}
+.seat.flash{animation:flash .5s}
+@keyframes flash{0%{background:var(--moss-t)}100%{background:#fff}}
+.seat[draggable="true"]{cursor:grab}
+.seat.dragging{opacity:.35}
+
+.ritem{
+  position:absolute;border:1.5px solid var(--ink);border-radius:3px;background:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:700;
+  font-size:var(--fs-room,11px);letter-spacing:.06em;
+}
+.ritem[data-kind="blackboard"]{background:#2f3b34;color:#fff;border-color:#2f3b34}
+.ritem[data-kind="podium"]{background:#f1f3f7}
+.ritem[data-kind="in"],.ritem[data-kind="out"]{background:#fff;border-style:dashed}
+.mode-room .ritem{cursor:move;box-shadow:0 0 0 2px var(--indigo-t)}
+.mode-room .ritem:hover{border-color:var(--indigo)}
+.ritem .x{
+  position:absolute;top:-9px;right:-9px;width:20px;height:20px;border-radius:50%;
+  background:var(--vermilion);color:#fff;font-size:12px;display:none;align-items:center;justify-content:center;line-height:1;
+}
+.mode-room .ritem .x{display:flex}
+
+/* ---------- 名前カード ---------- */
+.side{
+  flex:0 0 300px;border-left:1.5px solid var(--line);background:var(--card);
+  display:flex;flex-direction:column;min-height:0;
+}
+.side-head{flex:0 0 auto;padding:14px 15px 11px;border-bottom:1.5px solid var(--line2)}
+.side-head .r1{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
+.side-head h3{font-size:14.5px;font-weight:800}
+.side-head .cnt{font-family:var(--mono);font-size:12px;color:var(--ink3)}
+.side-head label.tog{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink2);margin-top:9px;cursor:pointer;font-weight:600}
+.cards{flex:1;min-height:0;overflow-y:auto;padding:11px 15px 30px;display:flex;flex-direction:column;gap:7px}
+.card{
+  display:flex;align-items:center;gap:10px;padding:9px 11px;border:1.5px solid var(--line);
+  border-radius:9px;background:var(--card);cursor:grab;transition:.1s;
+}
+.card:hover{border-color:var(--indigo);background:var(--indigo-t)}
+.card.dragging{opacity:.4}
+.card.placed{opacity:.42;background:#f7f9fc}
+.card .no{font-family:var(--mono);font-size:12px;color:var(--ink3);width:22px;text-align:right;flex:0 0 auto}
+.card .nm{font-weight:700;font-size:14.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .g{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.card .g.m{background:var(--indigo)} .card .g.f{background:var(--vermilion)}
+
+/* ---------- モーダル ---------- */
+.mask{position:fixed;inset:0;background:rgba(22,29,41,.46);display:flex;align-items:center;justify-content:center;padding:22px;z-index:50}
+.modal{background:var(--card);border-radius:15px;width:100%;max-width:520px;max-height:88vh;overflow:auto;box-shadow:0 22px 60px -18px rgba(22,29,41,.5)}
+.modal.wide{max-width:820px}
+.modal-h{padding:19px 22px 0}
+.modal-h h2{font-size:19px;font-weight:800}
+.modal-h p{font-size:13px;color:var(--ink2);margin-top:5px}
+.modal-b{padding:18px 22px}
+.modal-f{padding:14px 22px 19px;display:flex;gap:9px;justify-content:flex-end;flex-wrap:wrap}
+.alert{border-left:4px solid var(--vermilion);background:var(--vermilion-t);padding:12px 14px;border-radius:0 9px 9px 0;font-size:13.5px}
+.alert h4{font-weight:800;margin-bottom:5px;color:var(--vermilion)}
+.alert ul{margin:6px 0 0 17px;line-height:1.7}
+.note{background:var(--indigo-t);border-radius:9px;padding:12px 14px;font-size:13.5px;line-height:1.6}
+.check{display:flex;align-items:flex-start;gap:10px;padding:11px 13px;border:1.5px solid var(--line);border-radius:10px;cursor:pointer;margin-bottom:8px}
+.check:hover{border-color:var(--indigo);background:var(--indigo-t)}
+.check input{width:19px;height:19px;margin-top:1px;accent-color:var(--indigo);flex:0 0 auto}
+.check b{display:block;font-size:14px}
+.check small{color:var(--ink3);font-size:12px}
+
+.toast{
+  position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
+  background:var(--ink);color:#fff;padding:11px 20px;border-radius:99px;font-size:13.5px;
+  font-weight:600;z-index:80;box-shadow:0 10px 30px -10px rgba(0,0,0,.5);
+}
+
+/* ---------- レイアウト編集グリッド ---------- */
+.lay-seat{
+  border:1.5px solid var(--ink);border-radius:4px;background:#fff;display:flex;
+  align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;color:var(--ink3);
+  cursor:pointer;aspect-ratio:1.25;
+}
+.lay-seat:hover{border-color:var(--indigo);background:var(--indigo-t)}
+.lay-seat.off{border:1px dashed #ccd4e0;background:repeating-linear-gradient(45deg,#f2f4f8,#f2f4f8 4px,#e9edf3 4px,#e9edf3 8px);color:#b6bfcd}
+.lay-seat.picked{border-color:var(--amber);background:var(--amber-t);color:var(--amber);box-shadow:0 0 0 2.5px var(--amber-t)}
+.lay-seat.taken{border-color:var(--vermilion);background:var(--vermilion-t);color:var(--vermilion);font-size:9px;overflow:hidden;white-space:nowrap;padding:0 2px}
+
+@media (max-width:900px){
+  .panel{grid-template-columns:1fr}
+  .side{flex:0 0 232px}
+}
+
+/* ---------- 印刷 ---------- */
+@media print{
+  body{background:#fff;overflow:visible}
+  .topbar,.toolbar,.side,.no-print,.mask,.toast{display:none !important}
+  .view,.ed,.ed-body{overflow:visible;height:auto;display:block}
+  .canvas-pad{padding:0;background:none;display:block;container-type:normal}
+  .sheet{box-shadow:none;border:none;margin:0;page-break-inside:avoid}
+  .seat{border-color:#000 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .seat.off{visibility:hidden}
+  /* 固定・選択・交換対象などの編集中だけの状態表示は印刷に出さない */
+  .seat.fixed{box-shadow:none}
+  .seat .stamp{display:none !important}
+  .seat.sel,.seat.drop{box-shadow:none;background:#fff}
+  .seat.flash{animation:none;background:#fff}
+  .ritem{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .ritem .x{display:none !important}
+}
+
+/* ---------- 印刷プレビュー（画面中央のオーバーレイ） ---------- */
+/* 実際に紙へ印刷する@media printと同じ内容を、確認用のオーバーレイ上でも再現する */
+.print-preview .seat.fixed{box-shadow:none}
+.print-preview .seat .stamp{display:none !important}
+.print-preview .seat.sel,.print-preview .seat.drop{box-shadow:none;background:#fff}
+.print-preview .seat.flash{animation:none;background:#fff}
+.print-preview .ritem .x{display:none !important}
+.print-preview .seat,.print-preview .ritem{pointer-events:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="layer"></div>
+<div id="toastbox"></div>
+<script>
+"use strict";
+/* =====================================================================
+   自動座席表作成ツール — プロトタイプ (single-file / no build)
+   ---------------------------------------------------------------------
+   本番実装は Next.js(App Router)+TS+Tailwind+dnd-kit+Zustand+IndexedDB。
+   本ファイルは画面遷移・操作性・座席アルゴリズムの検証用モック。
+   store.* をIndexedDBアダプタに差し替えれば永続化に移行できる構造。
+   ===================================================================== */
+
+/* ---------------- ユーティリティ ---------------- */
+const uid = (p="id") => p + "_" + Math.random().toString(36).slice(2,9);
+const el = (t,a={},...c)=>{const n=document.createElement(t);
+  for(const[k,v]of Object.entries(a)){
+    if(v===null||v===false||v===undefined)continue;
+    if(k==="class")n.className=v; else if(k==="html")n.innerHTML=v;
+    else if(k==="text")n.textContent=v;
+    else if(k.startsWith("on"))n.addEventListener(k.slice(2).toLowerCase(),v);
+    else if(k==="style"&&typeof v==="object")Object.assign(n.style,v);
+    else n.setAttribute(k,v===true?"":v);
+  }
+  c.flat().forEach(x=>{if(x==null||x===false)return;n.append(x.nodeType?x:document.createTextNode(x))});
+  return n;};
+const $=(s,r=document)=>r.querySelector(s);
+const clone=o=>JSON.parse(JSON.stringify(o));
+const shuffle=a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+const todayISO=()=>new Date().toISOString().slice(0,10);
+const jpDate=iso=>{if(!iso)return"";const[y,m,d]=iso.split("-");return `${+y}年${+m}月${+d}日`};
+const jpDT=ts=>{const d=new Date(ts);const p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`};
+
+/* ---------------- ふりがな → ローマ字 ---------------- */
+const ROMA = {
+ "きゃ":"KYA","きゅ":"KYU","きょ":"KYO","しゃ":"SHA","しゅ":"SHU","しょ":"SHO",
+ "ちゃ":"CHA","ちゅ":"CHU","ちょ":"CHO","にゃ":"NYA","にゅ":"NYU","にょ":"NYO",
+ "ひゃ":"HYA","ひゅ":"HYU","ひょ":"HYO","みゃ":"MYA","みゅ":"MYU","みょ":"MYO",
+ "りゃ":"RYA","りゅ":"RYU","りょ":"RYO","ぎゃ":"GYA","ぎゅ":"GYU","ぎょ":"GYO",
+ "じゃ":"JA","じゅ":"JU","じょ":"JO","びゃ":"BYA","びゅ":"BYU","びょ":"BYO",
+ "ぴゃ":"PYA","ぴゅ":"PYU","ぴょ":"PYO",
+ "あ":"A","い":"I","う":"U","え":"E","お":"O","か":"KA","き":"KI","く":"KU","け":"KE","こ":"KO",
+ "さ":"SA","し":"SHI","す":"SU","せ":"SE","そ":"SO","た":"TA","ち":"CHI","つ":"TSU","て":"TE","と":"TO",
+ "な":"NA","に":"NI","ぬ":"NU","ね":"NE","の":"NO","は":"HA","ひ":"HI","ふ":"FU","へ":"HE","ほ":"HO",
+ "ま":"MA","み":"MI","む":"MU","め":"ME","も":"MO","や":"YA","ゆ":"YU","よ":"YO",
+ "ら":"RA","り":"RI","る":"RU","れ":"RE","ろ":"RO","わ":"WA","を":"O","ん":"N",
+ "が":"GA","ぎ":"GI","ぐ":"GU","げ":"GE","ご":"GO","ざ":"ZA","じ":"JI","ず":"ZU","ぜ":"ZE","ぞ":"ZO",
+ "だ":"DA","ぢ":"JI","づ":"ZU","で":"DE","ど":"DO","ば":"BA","び":"BI","ぶ":"BU","べ":"BE","ぼ":"BO",
+ "ぱ":"PA","ぴ":"PI","ぷ":"PU","ぺ":"PE","ぽ":"PO","ぁ":"A","ぃ":"I","ぅ":"U","ぇ":"E","ぉ":"O"
+};
+function toRomaji(kana){
+  if(!kana) return "";
+  // 全角カタカナ → ひらがな、空白除去
+  let s = kana.replace(/[\u30a1-\u30f6]/g, c=>String.fromCharCode(c.charCodeAt(0)-0x60))
+              .replace(/[\s　]/g,"");
+  let out="";
+  for(let i=0;i<s.length;i++){
+    const two=s.slice(i,i+2);
+    if(ROMA[two]){out+=ROMA[two];i++;continue}
+    const ch=s[i];
+    if(ch==="っ"){ // 促音：次の子音を重ねる
+      const nx=ROMA[s.slice(i+1,i+3)]||ROMA[s[i+1]]||"";
+      out += (nx[0]==="C" ? "T" : (nx[0]||""));
+      continue;
+    }
+    if(ch==="ー"){continue}
+    out += ROMA[ch] ?? "";
+  }
+  return out;
+}
+
+/* ---------------- 用紙寸法 ---------------- */
+const PAPER={A4:{w:210,h:297},B5:{w:182,h:257}};
+const paperAR=(p,o)=>{const d=PAPER[p];return o==="landscape"? d.h/d.w : d.w/d.h};
+
+/* ---------------- データモデル ---------------- */
+function makeSeats(cols,rows){
+  const s=[];
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++)
+    s.push({id:`s_${r}_${c}`,col:c,row:r,enabled:true,tags:[]});
+  return s;
+}
+function defaultRoom(){
+  return [
+    {id:uid("ri"),kind:"blackboard",label:"黒　板",x:22,y:0,w:56,h:7},
+    {id:uid("ri"),kind:"podium",   label:"教卓",   x:38,y:10,w:24,h:8},
+    {id:uid("ri"),kind:"in",       label:"入口",   x:2, y:2, w:14,h:7},
+    {id:uid("ri"),kind:"out",      label:"出口",   x:84,y:88,w:14,h:7},
+  ];
+}
+function newTemplate(o={}){
+  const cols=o.cols??6, rows=o.rows??6;
+  return {
+    id:uid("tpl"), kind:o.kind||"homeroom",
+    className:o.className||"", teacherName:o.teacherName||"",
+    subjectName:o.subjectName||"",
+    roster:o.roster||[],
+    layout:{cols,rows,seats:makeSeats(cols,rows)},
+    room:defaultRoom(),
+    fixedSeats:o.fixedSeats||[],   // [{no, seatId}]
+    ngPairs:o.ngPairs||[],          // [[noA,noB]]
+    print:{paper:"A4",orient:"landscape",facing:"student"},
+    charts:[], createdAt:Date.now(), updatedAt:Date.now()
+  };
+}
+function newChart(tpl,startDate){
+  // 作成時点のレイアウト・教室・固定席・NGペアをスナップショットとして保持する。
+  // → テンプレート側を後から変更しても、過去の座席表は一切変化しない。
+  return {id:uid("ch"),name:"",startDate:startDate||todayISO(),endDate:"",
+          layout:clone(tpl.layout), room:clone(tpl.room),
+          fixedSeats:clone(tpl.fixedSeats), ngPairs:clone(tpl.ngPairs),
+          assign:{}, createdAt:Date.now(), updatedAt:Date.now()};
+}
+
+/* ---------------- IndexedDB（生API・外部ライブラリ不使用） ---------------- */
+const DB_NAME="seat-chart-tool", DB_VERSION=1, DB_STORE="templates";
+function idbOpen(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(DB_NAME,DB_VERSION);
+    req.onupgradeneeded=()=>{ req.result.createObjectStore(DB_STORE,{keyPath:"id"}) };
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function idbGetAll(){
+  const db=await idbOpen();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(DB_STORE,"readonly");
+    const req=tx.objectStore(DB_STORE).getAll();
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function idbPut(t){
+  const db=await idbOpen();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(DB_STORE,"readwrite");
+    tx.objectStore(DB_STORE).put(clone(t));
+    tx.oncomplete=()=>resolve();
+    tx.onerror=()=>reject(tx.error);
+  });
+}
+async function idbDelete(id){
+  const db=await idbOpen();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(DB_STORE,"readwrite");
+    tx.objectStore(DB_STORE).delete(id);
+    tx.oncomplete=()=>resolve();
+    tx.onerror=()=>reject(tx.error);
+  });
+}
+
+/* ---------------- ストア ----------------
+   同期API(get/add/save/remove)は画面描画がすべて同期前提のため維持し、
+   永続化はIndexedDBへの書き込みスルー（fire-and-forget）で行う。
+   起動時のload()でIndexedDBから読み込み、空なら見本データを作って書き込む。 */
+const store={
+  data:{templates:[]},
+  all(){return this.data.templates},
+  get(id){return this.data.templates.find(t=>t.id===id)},
+  save(t){t.updatedAt=Date.now(); idbPut(t).catch(()=>toast("保存に失敗しました（ストレージの空き容量をご確認ください）"))},
+  add(t){this.data.templates.unshift(t);this.save(t);return t},
+  remove(id){this.data.templates=this.data.templates.filter(t=>t.id!==id); idbDelete(id).catch(()=>{})},
+  async load(){
+    if(typeof indexedDB==="undefined"){ seed(); return }
+    try{
+      const all=await idbGetAll();
+      if(all.length) this.data.templates=all.sort((a,b)=>b.createdAt-a.createdAt);
+      else{ seed(); await Promise.all(this.data.templates.map(t=>idbPut(t))) }
+    }catch(err){ seed() }
+  }
+};
+
+/* ---------------- サンプルデータ ---------------- */
+const NAMES=[
+ ["相川 悠真","あいかわゆうま","m"],["石田 芽依","いしだめい","f"],["伊藤 陽翔","いとうはると","m"],
+ ["上原 咲希","うえはらさき","f"],["遠藤 蓮","えんどうれん","m"],["大野 結愛","おおのゆあ","f"],
+ ["岡田 湊","おかだみなと","m"],["加藤 凛","かとうりん","f"],["川口 大翔","かわぐちひろと","m"],
+ ["木村 陽菜","きむらひな","f"],["工藤 樹","くどういつき","m"],["小林 紬","こばやしつむぎ","f"],
+ ["斉藤 悠斗","さいとうゆうと","m"],["坂本 莉子","さかもとりこ","f"],["佐藤 陸","さとうりく","m"],
+ ["島田 葵","しまだあおい","f"],["鈴木 颯太","すずきそうた","m"],["高橋 心春","たかはしこはる","f"],
+ ["田中 蒼","たなかそう","m"],["中村 结衣","なかむらゆい","f"],["西村 朝陽","にしむらあさひ","m"],
+ ["野口 澪","のぐちみお","f"],["橋本 律","はしもとりつ","m"],["林 詩織","はやししおり","f"],
+ ["原田 新","はらだあらた","m"],["平野 杏","ひらのあん","f"],["福田 碧","ふくだあおい","m"],
+ ["藤井 花","ふじいはな","f"],["星野 悠","ほしのゆう","m"],["前田 楓","まえだかえで","f"],
+ ["松本 直樹","まつもとなおき","m"],["三浦 芽生","みうらめい","f"],["宮本 拓海","みやもとたくみ","m"],
+ ["森田 結菜","もりたゆいな","f"],["山田 太郎","やまだたろう","m"]
+];
+function roster(n,offset=0){
+  return NAMES.slice(offset,offset+n).map((x,i)=>({
+    no:i+1,name:x[0],kana:x[1],romaji:toRomaji(x[1]),gender:x[2]
+  }));
+}
+function seed(){
+  const t1=newTemplate({kind:"homeroom",className:"1年1組",teacherName:"佐々木 一郎",cols:6,rows:6,roster:roster(35)});
+  // 6×6=36席のうち1席を削除して35名にぴったり合わせる
+  t1.layout.seats.find(s=>s.id==="s_5_5").enabled=false;
+  t1.fixedSeats=[{no:18,seatId:"s_1_2"}];   // 高橋さんを前から2列目・3番へ固定
+  t1.ngPairs=[[19,17]];                     // 田中 － 鈴木
+  const c1=newChart(t1,"2026-04-10");
+  const ss=c1.layout.seats.filter(s=>s.enabled);
+  t1.roster.forEach((st,i)=>{ if(ss[i]) c1.assign[ss[i].id]=st.no; });
+  c1.createdAt=new Date("2026-04-10T08:12:00").getTime(); c1.updatedAt=c1.createdAt;
+  const c2=newChart(t1,"2026-05-20"); c2.assign=clone(c1.assign);
+  c2.createdAt=new Date("2026-05-19T17:40:00").getTime(); c2.updatedAt=c2.createdAt;
+  t1.charts=[c2,c1];
+
+  const t2=newTemplate({kind:"homeroom",className:"1年2組",teacherName:"井上 美咲",cols:6,rows:6,roster:roster(33,2)});
+  const t3=newTemplate({kind:"elective",subjectName:"数学Ⅱ（選択）",teacherName:"渡辺 健",cols:5,rows:5,roster:roster(22,5)});
+  const t4=newTemplate({kind:"elective",subjectName:"英語少人数",teacherName:"Green, S.",cols:4,rows:4,roster:roster(16,10)});
+  const t5=newTemplate({kind:"elective",subjectName:"理科実験",teacherName:"大塚 里奈",cols:4,rows:5,roster:roster(20,3)});
+  t5.print.orient="portrait";
+  store.data.templates=[t1,t2,t3,t4,t5];
+}
+
+/* ---------------- 表示ルール ---------------- */
+const titleOf = t => t.kind==="elective" ? (t.subjectName||"（授業名未設定）") : (t.className||"（クラス名未設定）");
+const subOf   = t => t.kind==="elective" ? `担当：${t.teacherName||"—"}` : `担任：${t.teacherName||"—"}`;
+
+/* ---------------- ルーター ---------------- */
+const R={view:"home", tplId:null, chartId:null, tab:"basic", q:""};
+function go(patch){Object.assign(R,patch);render()}
+
+/* ---------------- トースト / モーダル ---------------- */
+let toastT;
+function toast(msg){
+  const b=$("#toastbox"); b.innerHTML="";
+  b.append(el("div",{class:"toast",text:msg}));
+  clearTimeout(toastT); toastT=setTimeout(()=>b.innerHTML="",2200);
+}
+function closeModal(){$("#layer").innerHTML=""}
+function modal({title,desc,body,footer,wide}){
+  const m=el("div",{class:"mask",onclick:e=>{if(e.target===m)closeModal()}},
+    el("div",{class:"modal"+(wide?" wide":""),role:"dialog","aria-modal":"true"},
+      el("div",{class:"modal-h"}, el("h2",{text:title}), desc?el("p",{text:desc}):null),
+      el("div",{class:"modal-b"}, body),
+      el("div",{class:"modal-f"}, footer)
+    ));
+  $("#layer").innerHTML=""; $("#layer").append(m);
+  setTimeout(()=>{const f=m.querySelector("input,select,button.btn-primary");f&&f.focus()},30);
+  return m;
+}
+
+/* =====================================================================
+   画面 1 — ホーム
+   ===================================================================== */
+function viewHome(){
+  const grid=el("div",{class:"tgrid"});
+  const emptyBox=el("div",{class:"empty"},el("h3",{text:"見つかりませんでした"}),
+    el("p",{text:"別のことばで検索するか、新しいテンプレートを作成してください。"}));
+
+  function drawGrid(){
+  const q=R.q.trim().toLowerCase();
+  const list=store.all().filter(t=>!q||
+    (titleOf(t)+t.teacherName+t.className+t.subjectName).toLowerCase().includes(q));
+  grid.innerHTML="";
+  emptyBox.style.display=(list.length||!q)?"none":"";
+  grid.style.display=(list.length||!q)?"":"none";
+  grid.append(
+    el("button",{class:"tcard tcard-new",onclick:dlgNewTemplate},
+      el("span",{class:"plus",text:"＋"}), "新しいテンプレート",
+      el("span",{class:"eyebrow",text:"HR / 授業"})),
+    ...list.map(t=>{
+      const enabled=t.layout.seats.filter(s=>s.enabled).length;
+      const mini=el("div",{class:"mini",style:{gridTemplateColumns:`repeat(${t.layout.cols},7px)`,
+        gridTemplateRows:`repeat(${t.layout.rows},7px)`}});
+      t.layout.seats.forEach(s=>mini.append(el("i",{style:{opacity:s.enabled?"":"0.12"}})));
+      return el("button",{class:"tcard",onclick:()=>go({view:"tpl",tplId:t.id,tab:"basic"})},
+        el("div",{class:"tk"},
+          el("div",{},
+            el("h3",{text:titleOf(t)}),
+            el("div",{class:"sub",text:subOf(t)})),
+          el("span",{class:"chip "+(t.kind==="elective"?"chip-a":"chip-i"),
+                     text:t.kind==="elective"?"授業":"HR"})),
+        mini,
+        el("div",{class:"meta"},
+          el("span",{},"名簿 ",el("b",{class:"num",text:t.roster.length+"名"})),
+          el("span",{},"座席 ",el("b",{class:"num",text:enabled+"席"})),
+          el("span",{},"履歴 ",el("b",{class:"num",text:t.charts.length+"件"})))
+      );
+    }));
+  }
+  drawGrid();
+
+  return el("div",{class:"wrap"},
+    el("div",{class:"home-hero"},
+      el("div",{},
+        el("div",{class:"eyebrow",text:"Templates"}),
+        el("h1",{text:"テンプレート"}),
+        el("p",{text:"クラス・授業ごとに名簿と座席レイアウトを保存しておきます。"})),
+      el("div",{class:"searchbar"},
+        el("input",{class:"input",type:"search",placeholder:"クラス名・授業名・担任名で検索",
+          value:R.q,oninput:e=>{R.q=e.target.value;drawGrid()}}))),
+    grid, emptyBox
+  );
+}
+function dlgNewTemplate(){
+  let kind="homeroom";
+  const f1=el("input",{class:"input",placeholder:"例：2年3組"});
+  const f2=el("input",{class:"input",placeholder:"例：佐々木 一郎"});
+  const wrapName=el("label",{class:"field"},el("span",{text:"クラス名"}),f1);
+  const seg=el("div",{class:"seg"},
+    el("button",{"aria-pressed":"true",onclick:e=>setKind("homeroom",e)},"HR"),
+    el("button",{"aria-pressed":"false",onclick:e=>setKind("elective",e)},"授業"));
+  function setKind(k,e){
+    kind=k;[...seg.children].forEach(b=>b.setAttribute("aria-pressed",String(b===e.target)));
+    wrapName.firstChild.textContent = k==="elective"?"授業名":"クラス名";
+    f1.placeholder = k==="elective"?"例：数学Ⅱ（選択）":"例：2年3組";
+    wrapName.nextSibling.firstChild.textContent = k==="elective"?"担当名":"担任名";
+  }
+  const cols=el("input",{class:"input",type:"number",value:"6",min:"1",max:"12"});
+  const rows=el("input",{class:"input",type:"number",value:"6",min:"1",max:"12"});
+  modal({
+    title:"新しいテンプレート",
+    desc:"あとから基本設定でいつでも変更できます。",
+    body:el("div",{},
+      el("label",{class:"field"},el("span",{text:"種別"}),seg),
+      wrapName,
+      el("label",{class:"field"},el("span",{text:"担任名"}),f2),
+      el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}},
+        el("label",{class:"field"},el("span",{text:"列数（横）"}),cols),
+        el("label",{class:"field"},el("span",{text:"行数（縦）"}),rows)),
+      el("div",{class:"note",text:"座席グリッドを自動生成します。不要な席の削除・追加は次の画面で1席ずつ行えます。"})),
+    footer:[
+      el("button",{class:"btn",onclick:closeModal},"キャンセル"),
+      el("button",{class:"btn btn-primary",onclick:()=>{
+        const name=f1.value.trim();
+        if(!name){f1.focus();toast("名称を入力してください");return}
+        const t=newTemplate({kind,teacherName:f2.value.trim(),
+          className:kind==="homeroom"?name:"",subjectName:kind==="elective"?name:"",
+          cols:Math.min(12,Math.max(1,+cols.value||6)),rows:Math.min(12,Math.max(1,+rows.value||6))});
+        store.add(t);closeModal();go({view:"tpl",tplId:t.id,tab:"basic"});
+        toast("テンプレートを作成しました");
+      }},"作成する")]
+  });
+}
+
+/* =====================================================================
+   画面 2 — テンプレート詳細
+   ===================================================================== */
+function viewTemplate(){
+  const t=store.get(R.tplId); if(!t)return go({view:"home"});
+  const tabs=[["basic","基本設定"],["roster","名簿管理"],["layout","座席レイアウト"],["rules","固定席・NGペア"],["history","座席表履歴"]];
+  const body={basic:paneBasic,roster:paneRoster,layout:paneLayout,rules:paneRules,history:paneHistory}[R.tab](t);
+
+  return el("div",{class:"wrap"},
+    el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:"16px",flexWrap:"wrap"}},
+      el("div",{},
+        el("div",{class:"eyebrow",text:t.kind==="elective"?"Elective class":"Homeroom"}),
+        el("h1",{style:{fontSize:"26px",fontWeight:"800"},text:titleOf(t)}),
+        el("p",{style:{color:"var(--ink2)",fontSize:"13.5px"},text:subOf(t)})),
+      el("button",{class:"btn btn-primary btn-lg",onclick:()=>dlgNewChart(t)},"新しい座席表を作成")),
+    el("div",{class:"tabs",role:"tablist"},
+      ...tabs.map(([k,l])=>el("button",{role:"tab","aria-selected":String(R.tab===k),
+        onclick:()=>go({tab:k})},l))),
+    body);
+}
+
+/* --- 基本設定 --- */
+function paneBasic(t){
+  const bind=(k,ev="input")=>e=>{t[k]=e.target.value;store.save(t)};
+  const paperSeg=(key,opts)=>{
+    const s=el("div",{class:"seg"});
+    opts.forEach(([v,l])=>s.append(el("button",{"aria-pressed":String(t.print[key]===v),
+      onclick:()=>{t.print[key]=v;store.save(t);go({})}},l)));
+    return s;
+  };
+  return el("div",{class:"panel"},
+    el("div",{class:"box"},
+      el("h3",{text:"クラス・担任"}),
+      el("p",{class:"hint",text:"ここで入力した内容が座席表の右上に印刷されます。"}),
+      t.kind==="elective"
+        ? el("label",{class:"field"},el("span",{text:"授業名"}),el("input",{class:"input",value:t.subjectName,oninput:bind("subjectName")}))
+        : el("label",{class:"field"},el("span",{text:"クラス名"}),el("input",{class:"input",value:t.className,oninput:bind("className")})),
+      el("label",{class:"field"},el("span",{text:t.kind==="elective"?"担当名":"担任名"}),
+        el("input",{class:"input",value:t.teacherName,oninput:bind("teacherName")})),
+      el("div",{class:"note",html:"表示ルール：HRは<b>クラス名＋担任名</b>、授業は<b>授業名＋担当名</b>。"})),
+    el("div",{class:"box"},
+      el("h3",{text:"用紙設定"}),
+      el("p",{class:"hint",text:"座席サイズ・余白・文字サイズを自動調整し、必ず1ページに収めます。"}),
+      el("label",{class:"field"},el("span",{text:"用紙サイズ"}),paperSeg("paper",[["A4","A4"],["B5","B5"]])),
+      el("label",{class:"field"},el("span",{text:"用紙の向き"}),paperSeg("orient",[["portrait","縦"],["landscape","横"]])),
+      el("div",{style:{marginTop:"14px"}}, previewSheet(t))),
+    el("div",{class:"box",style:{gridColumn:"1 / -1",borderColor:"#e8c4bc"}},
+      el("h3",{style:{color:"var(--vermilion)"},text:"テンプレートの削除"}),
+      el("p",{class:"hint",text:"名簿・座席レイアウト・座席表履歴など、このテンプレートに含まれるすべてのデータが削除されます。元に戻せません。"}),
+      el("button",{class:"btn btn-danger",onclick:()=>dlgDeleteTemplate(t)},"このテンプレートを削除する")),
+  );
+}
+function dlgDeleteTemplate(t){
+  modal({title:"このテンプレートを削除しますか？",
+    desc:`「${titleOf(t)}」を削除します。`,
+    body:el("div",{class:"alert"},el("h4",{text:"削除の確認"}),
+      el("div",{text:`名簿${t.roster.length}名・座席表履歴${t.charts.length}件を含め、すべて失われます。元に戻せません。`})),
+    footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
+      el("button",{class:"btn btn-danger",onclick:()=>{
+        store.remove(t.id);closeModal();go({view:"home"});toast("テンプレートを削除しました");
+      }},"削除する")]});
+}
+function previewSheet(t){
+  const ar=paperAR(t.print.paper,t.print.orient);
+  const box=el("div",{style:{border:"1px solid var(--line2)",borderRadius:"9px",padding:"14px",
+    background:"var(--paper)",display:"grid",placeItems:"center",height:"180px"}});
+  const sh=el("div",{style:{background:"#fff",border:"1px solid var(--line)",height:"100%",
+    aspectRatio:String(ar),boxShadow:"0 2px 12px -6px rgba(0,0,0,.3)",display:"grid",
+    gridTemplateColumns:`repeat(${t.layout.cols},1fr)`,gridTemplateRows:`repeat(${t.layout.rows},1fr)`,
+    gap:"2px",padding:"14px 8px 8px"}});
+  t.layout.seats.forEach(s=>sh.append(el("i",{style:{background:s.enabled?"var(--indigo)":"transparent",
+    border:s.enabled?"none":"1px dashed #dde2ea",opacity:s.enabled?".5":"1",borderRadius:"1px"}})));
+  box.append(sh);
+  return el("div",{},el("div",{class:"eyebrow",style:{marginBottom:"7px"},
+    text:`Preview — ${t.print.paper} ${t.print.orient==="portrait"?"縦":"横"}`}),box);
+}
+
+/* --- 名簿管理 --- */
+function paneRoster(t){
+  const tbody=el("tbody");
+  const draw=()=>{
+    tbody.innerHTML="";
+    t.roster.forEach(s=>tbody.append(el("tr",{},
+      el("td",{class:"num",text:s.no}),
+      el("td",{style:{fontWeight:"700"},text:s.name}),
+      el("td",{style:{color:"var(--ink2)"},text:s.kana}),
+      el("td",{class:"num",style:{fontSize:"11.5px"}},
+        el("input",{class:"input",style:{minHeight:"30px",padding:"0 6px",fontSize:"11.5px",fontFamily:"var(--mono)"},
+          value:s.romaji,title:"手動で修正できます",
+          onchange:e=>{s.romaji=e.target.value.trim();store.save(t)}})),
+      el("td",{},el("span",{class:"chip "+(s.gender==="m"?"chip-i":"chip-v"),text:s.gender==="m"?"男":"女"})),
+      el("td",{style:{textAlign:"right"}},el("button",{class:"btn btn-sm btn-danger",
+        onclick:()=>{t.roster=t.roster.filter(x=>x!==s);store.save(t);draw();}},"削除")))));
+    if(!t.roster.length)tbody.append(el("tr",{},el("td",{colspan:"6",
+      style:{padding:"36px",textAlign:"center",color:"var(--ink3)"},
+      text:"名簿がまだありません。CSVを読み込むか、1名ずつ追加してください。"})));
+  };
+  draw();
+  const file=el("input",{type:"file",accept:".csv,.txt,.xlsx",style:{display:"none"},
+    onchange:e=>{importRoster(e.target.files[0],t,draw);e.target.value=""}});
+
+  return el("div",{},
+    el("div",{class:"box",style:{marginBottom:"18px"}},
+      el("h3",{text:"名簿の読み込み"}),
+      el("p",{class:"hint",html:"CSV / Excel(.xlsx) に対応。必須列は <b>番号・氏名・ふりがな・性別</b>。ふりがなからローマ字を自動生成します（任意で「ローマ字」列があればそちらを優先）。"}),
+      el("div",{style:{display:"flex",gap:"9px",flexWrap:"wrap"}},
+        el("button",{class:"btn btn-primary",onclick:()=>file.click()},"ファイルを読み込む"),
+        el("button",{class:"btn",onclick:()=>dlgAddStudent(t,draw)},"1名ずつ追加"),
+        el("button",{class:"btn",onclick:()=>{
+          const csv="番号,氏名,ふりがな,性別\n1,山田 太郎,やまだたろう,男\n2,佐藤 花子,さとうはなこ,女\n";
+          const a=el("a",{href:URL.createObjectURL(new Blob([`\ufeff${csv}`],{type:"text/csv"})),download:"名簿テンプレート.csv"});
+          a.click();toast("見本CSVを書き出しました");
+        }},"見本CSVを書き出す"),
+        file)),
+    el("div",{class:"box"},
+      el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:"11px"}},
+        el("h3",{text:"名簿"}),
+        el("span",{class:"num",style:{fontSize:"12.5px",color:"var(--ink3)"},
+          text:`${t.roster.length}名（男 ${t.roster.filter(s=>s.gender==="m").length} / 女 ${t.roster.filter(s=>s.gender==="f").length}）`})),
+      el("div",{class:"scroller"},
+        el("table",{class:"tbl"},
+          el("thead",{},el("tr",{},...["番号","氏名","ふりがな","ローマ字","性別",""].map(h=>el("th",{text:h})))),
+          tbody))));
+}
+/* ---------------- CSV パーサ（引用符・カンマ・改行入りセル対応） ---------------- */
+function parseCSV(text){
+  const rows=[];let row=[],field="",inQ=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(inQ){
+      if(ch==='"'){ if(text[i+1]==='"'){field+='"';i++} else inQ=false; }
+      else field+=ch;
+    }else{
+      if(ch==='"')inQ=true;
+      else if(ch===",")  {row.push(field);field="";}
+      else if(ch==="\r") {/* 改行はLFで確定するため無視 */}
+      else if(ch==="\n") {row.push(field);rows.push(row);row=[];field="";}
+      else field+=ch;
+    }
+  }
+  if(field!==""||row.length){row.push(field);rows.push(row);}
+  return rows;
+}
+
+/* ---------------- .xlsx パーサ（外部ライブラリ不使用・ブラウザ内蔵APIのみでZIP展開） ---------------- */
+async function inflateRaw(bytes){
+  const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+function readZipEntries(buf){
+  const dv=new DataView(buf);
+  const sig=0x06054b50;
+  let eocd=-1;
+  const start=Math.max(0,buf.byteLength-22-65557);
+  for(let i=buf.byteLength-22;i>=start;i--){ if(dv.getUint32(i,true)===sig){eocd=i;break} }
+  if(eocd<0)throw new Error("xlsx（ZIP形式）として認識できませんでした");
+  const cdCount=dv.getUint16(eocd+10,true);
+  let off=dv.getUint32(eocd+16,true);
+  const entries={};
+  for(let n=0;n<cdCount;n++){
+    if(dv.getUint32(off,true)!==0x02014b50)break;
+    const method=dv.getUint16(off+10,true);
+    const compSize=dv.getUint32(off+20,true);
+    const nameLen=dv.getUint16(off+28,true);
+    const extraLen=dv.getUint16(off+30,true);
+    const commentLen=dv.getUint16(off+32,true);
+    const lho=dv.getUint32(off+42,true);
+    const name=new TextDecoder().decode(new Uint8Array(buf,off+46,nameLen));
+    entries[name]={method,compSize,lho};
+    off+=46+nameLen+extraLen+commentLen;
+  }
+  return entries;
+}
+async function readZipEntry(buf,entries,name){
+  const e=entries[name]; if(!e)return null;
+  const dv=new DataView(buf);
+  if(dv.getUint32(e.lho,true)!==0x04034b50)throw new Error("ZIPローカルヘッダが不正です");
+  const nameLen=dv.getUint16(e.lho+26,true);
+  const extraLen=dv.getUint16(e.lho+28,true);
+  const dataOff=e.lho+30+nameLen+extraLen;
+  const raw=new Uint8Array(buf,dataOff,e.compSize);
+  if(e.method===0)return raw.slice();
+  if(e.method===8)return inflateRaw(raw);
+  throw new Error("未対応の圧縮方式（method="+e.method+"）です");
+}
+async function parseXLSXRows(file){
+  const buf=await file.arrayBuffer();
+  const entries=readZipEntries(buf);
+  const dec=new TextDecoder("utf-8");
+  const xml=async name=>{
+    const bytes=await readZipEntry(buf,entries,name);
+    return bytes?new DOMParser().parseFromString(dec.decode(bytes),"application/xml"):null;
+  };
+  const wb=await xml("xl/workbook.xml");
+  if(!wb)throw new Error("workbook.xml が見つかりません");
+  const firstSheet=wb.querySelector("sheets sheet");
+  if(!firstSheet)throw new Error("シートが見つかりません");
+  const rId=firstSheet.getAttribute("r:id")
+    ||firstSheet.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","id");
+  const rels=await xml("xl/_rels/workbook.xml.rels");
+  let target="worksheets/sheet1.xml";
+  if(rels){
+    const rel=[...rels.getElementsByTagName("Relationship")].find(r=>r.getAttribute("Id")===rId);
+    if(rel)target=rel.getAttribute("Target").replace(/^\/?xl\//,"").replace(/^\.?\//,"");
+  }
+  const sheetDoc=await xml("xl/"+target);
+  if(!sheetDoc)throw new Error("先頭のシートを読み込めませんでした");
+  let shared=[];
+  const ssDoc=await xml("xl/sharedStrings.xml");
+  if(ssDoc)shared=[...ssDoc.getElementsByTagName("si")]
+    .map(si=>[...si.getElementsByTagName("t")].map(t=>t.textContent).join(""));
+  const colToIdx=col=>{let n=0;for(const ch of col)n=n*26+(ch.charCodeAt(0)-64);return n-1};
+  return [...sheetDoc.getElementsByTagName("row")].map(rEl=>{
+    const row=[];
+    [...rEl.getElementsByTagName("c")].forEach(c=>{
+      const ref=c.getAttribute("r")||"";
+      const i=colToIdx((ref.match(/^[A-Z]+/)||["A"])[0]);
+      const type=c.getAttribute("t");
+      let val="";
+      if(type==="inlineStr"){
+        const is=c.getElementsByTagName("is")[0];
+        val=is?[...is.getElementsByTagName("t")].map(t=>t.textContent).join(""):"";
+      }else{
+        const v=c.getElementsByTagName("v")[0];
+        const raw=v?v.textContent:"";
+        val=type==="s"?(shared[+raw]||""):raw;
+      }
+      row[i]=val;
+    });
+    for(let i=0;i<row.length;i++)if(row[i]===undefined)row[i]="";
+    return row;
+  });
+}
+
+/* ---------------- 取り込み共通処理 ---------------- */
+function applyRosterRows(rows,t,draw){
+  rows=rows.filter(r=>r.some(c=>String(c??"").trim()!==""));
+  if(!rows.length)return dlgError("名簿を読み込めませんでした",["データが空です"]);
+  const head=rows[0].map(s=>String(s??"").trim());
+  const idx=k=>head.findIndex(h=>h.includes(k));
+  const iNo=idx("番号"),iNm=idx("氏名"),iKn=idx("ふりがな"),iGd=idx("性別"),iRj=idx("ローマ字");
+  if([iNo,iNm,iKn,iGd].some(i=>i<0))
+    return dlgError("名簿を読み込めませんでした",["必須列が見つかりません：番号・氏名・ふりがな・性別","1行目を見出し行にしてください"]);
+  const out=[];
+  rows.slice(1).forEach(r=>{
+    const name=String(r[iNm]??"").trim(); if(!name)return;
+    const kana=String(r[iKn]??"").trim();
+    const manualRj=iRj>=0?String(r[iRj]??"").trim():"";
+    out.push({no:+r[iNo]||out.length+1,name,kana,romaji:manualRj||toRomaji(kana),
+      gender:/女|f/i.test(String(r[iGd]??""))?"f":"m"});
+  });
+  if(!out.length)return dlgError("名簿を読み込めませんでした",["データ行がありません"]);
+  t.roster=out;store.save(t);draw();toast(`${out.length}名を読み込みました`);
+}
+async function importRoster(file,t,draw){
+  if(!file)return;
+  try{
+    let rows;
+    if(/\.xlsx$/i.test(file.name)){
+      if(typeof DecompressionStream==="undefined")
+        return dlgError("この .xlsx を読み込めませんでした",
+          ["このブラウザは.xlsx読み込みに必要な機能(DecompressionStream)に対応していません","CSV形式で書き出して読み込んでください"]);
+      rows=await parseXLSXRows(file);
+    }else{
+      rows=parseCSV(String(await file.text()).replace(/^﻿/,""));
+    }
+    applyRosterRows(rows,t,draw);
+  }catch(err){
+    dlgError("名簿を読み込めませんでした",[String(err&&err.message||err),"ファイル形式を確認するか、CSVで書き出し直してください"]);
+  }
+}
+
+function dlgAddStudent(t,draw){
+  const nm=el("input",{class:"input",placeholder:"例：山田 太郎"});
+  const kn=el("input",{class:"input",placeholder:"例：やまだたろう"});
+  const rj=el("input",{class:"input",style:{fontFamily:"var(--mono)"}});
+  let rjTouched=false;
+  rj.addEventListener("input",()=>{rjTouched=true});
+  kn.addEventListener("input",()=>{if(!rjTouched)rj.value=toRomaji(kn.value)});
+  const gd=el("select",{class:"input"},el("option",{value:"m"},"男"),el("option",{value:"f"},"女"));
+  modal({title:"生徒を追加",body:el("div",{},
+      el("label",{class:"field"},el("span",{text:"氏名"}),nm),
+      el("label",{class:"field"},el("span",{text:"ふりがな"}),kn),
+      el("label",{class:"field"},el("span",{text:"ローマ字（ふりがなから自動生成・手修正可）"}),rj),
+      el("label",{class:"field"},el("span",{text:"性別"}),gd)),
+    footer:[el("button",{class:"btn",onclick:closeModal},"キャンセル"),
+      el("button",{class:"btn btn-primary",onclick:()=>{
+        if(!nm.value.trim())return nm.focus();
+        t.roster.push({no:t.roster.length+1,name:nm.value.trim(),kana:kn.value.trim(),
+          romaji:rj.value.trim()||toRomaji(kn.value),gender:gd.value});
+        store.save(t);draw();closeModal();toast("追加しました");
+      }},"追加する")]});
+}
+function dlgError(title,causes){
+  modal({title,body:el("div",{class:"alert"},
+      el("h4",{text:"処理を中止しました"}),
+      el("div",{text:"考えられる原因："}),
+      el("ul",{},...causes.map(c=>el("li",{text:c})))),
+    footer:[el("button",{class:"btn btn-primary",onclick:closeModal},"閉じる")]});
+}
+
+/* --- 座席レイアウト編集 --- */
+function paneLayout(t){
+  const L=t.layout;
+  const rerender=()=>{store.save(t);go({})};
+
+  function regrid(cols,rows){
+    const keep=new Map(L.seats.map(s=>[`${s.row}:${s.col}`,s]));
+    const out=[];
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+      const old=keep.get(`${r}:${c}`);
+      out.push(old?{...old,row:r,col:c}:{id:uid("s"),row:r,col:c,enabled:true,tags:[]});
+    }
+    L.cols=cols;L.rows=rows;L.seats=out;rerender();
+  }
+  function addRowTop(){
+    L.seats.forEach(s=>s.row++);
+    for(let c=0;c<L.cols;c++)L.seats.push({id:uid("s"),row:0,col:c,enabled:false,tags:[]});
+    L.rows++;
+  }
+  function addRowBottom(){
+    for(let c=0;c<L.cols;c++)L.seats.push({id:uid("s"),row:L.rows,col:c,enabled:false,tags:[]});
+    L.rows++;
+  }
+  const at=(r,c)=>L.seats.find(s=>s.row===r&&s.col===c);
+  function addFront(c){
+    for(let r=0;r<L.rows;r++){const s=at(r,c);if(s&&!s.enabled){s.enabled=true;return rerender()}}
+    addRowTop();at(0,c).enabled=true;rerender();
+  }
+  function addBack(c){
+    for(let r=L.rows-1;r>=0;r--){const s=at(r,c);if(s&&!s.enabled){s.enabled=true;return rerender()}}
+    addRowBottom();at(L.rows-1,c).enabled=true;rerender();
+  }
+
+  const enabled=L.seats.filter(s=>s.enabled).length;
+  const diff=enabled-t.roster.length;
+
+  // グリッド本体（列ごとの追加ボタン付き）
+  const g=el("div",{style:{display:"grid",gap:"6px",
+    gridTemplateColumns:`26px repeat(${L.cols},minmax(38px,1fr))`}});
+  g.append(el("div"));
+  for(let c=0;c<L.cols;c++) g.append(el("button",{class:"btn btn-sm",title:`${c+1}列目の最前列に1席追加`,
+    style:{minHeight:"26px",padding:"0",fontSize:"11px"},onclick:()=>addFront(c)},"＋前"));
+  for(let r=0;r<L.rows;r++){
+    g.append(el("div",{class:"num",style:{fontSize:"10.5px",color:"var(--ink3)",display:"grid",placeItems:"center"},text:r+1}));
+    for(let c=0;c<L.cols;c++){
+      const s=at(r,c);
+      g.append(el("button",{class:"lay-seat"+(s.enabled?"":" off"),
+        title:s.enabled?"クリックで削除（位置は維持）":"クリックで復元",
+        onclick:()=>{s.enabled=!s.enabled;rerender()}},`${r+1}-${c+1}`));
+    }
+  }
+  g.append(el("div"));
+  for(let c=0;c<L.cols;c++) g.append(el("button",{class:"btn btn-sm",title:`${c+1}列目の最後尾に1席追加`,
+    style:{minHeight:"26px",padding:"0",fontSize:"11px"},onclick:()=>addBack(c)},"＋後"));
+
+  const colsIn=el("input",{class:"input",type:"number",min:"1",max:"12",value:L.cols});
+  const rowsIn=el("input",{class:"input",type:"number",min:"1",max:"12",value:L.rows});
+
+  return el("div",{class:"panel"},
+    el("div",{class:"box"},
+      el("h3",{text:"① 基本レイアウト"}),
+      el("p",{class:"hint",text:"列数・行数を決めると座席グリッドを自動生成します。"}),
+      el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:"12px",alignItems:"end"}},
+        el("label",{class:"field",style:{marginBottom:"0"}},el("span",{text:"列数（横）"}),colsIn),
+        el("label",{class:"field",style:{marginBottom:"0"}},el("span",{text:"行数（縦）"}),rowsIn),
+        el("button",{class:"btn",onclick:()=>regrid(
+          Math.min(12,Math.max(1,+colsIn.value||L.cols)),
+          Math.min(12,Math.max(1,+rowsIn.value||L.rows)))},"再生成")),
+      el("div",{class:"note",style:{marginTop:"14px"},
+        text:"再生成しても、すでに削除した席の状態はできる限り引き継ぎます。"}),
+      el("h3",{style:{marginTop:"22px"},text:"③ 保存と反映"}),
+      el("p",{class:"hint",text:"変更はテンプレートへ即時保存され、これから作成する座席表に反映されます。過去の座席表履歴は変更されません。"}),
+      el("div",{style:{display:"flex",gap:"9px",flexWrap:"wrap"}},
+        el("button",{class:"btn",onclick:()=>{L.seats.forEach(s=>s.enabled=true);rerender();toast("すべての座席を復元しました")}},"削除した席をすべて復元"),
+        el("button",{class:"btn btn-primary",onclick:()=>{store.save(t);toast("座席レイアウトを保存しました")}},"保存する"))),
+    el("div",{class:"box"},
+      el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:"10px",flexWrap:"wrap"}},
+        el("h3",{text:"② 1席単位の編集"}),
+        el("span",{class:"chip "+(diff===0?"chip-m":diff>0?"chip-i":"chip-v"),
+          text:diff===0?`${enabled}席 ＝ 名簿${t.roster.length}名`
+             :diff>0?`${enabled}席（空席 ${diff}）`:`${enabled}席（${-diff}席不足）`})),
+      el("p",{class:"hint",text:"席をクリックすると削除／復元します。削除した席はグレーで残り、ほかの席は詰めません。印刷時には表示されません。"}),
+      g));
+}
+
+/* --- 固定席・NGペア --- */
+function paneRules(t){
+  const seatLabel=id=>{const s=t.layout.seats.find(x=>x.id===id);
+    return s?`前から${s.row+1}列目・${s.col+1}番`:"—"};
+  const nameOf=no=>t.roster.find(s=>s.no===no)?.name??`#${no}`;
+
+  const fixList=el("div",{class:"hist"});
+  const drawFix=()=>{
+    fixList.innerHTML="";
+    if(!t.fixedSeats.length)fixList.append(el("p",{style:{color:"var(--ink3)",fontSize:"13px"},text:"固定席はまだありません。"}));
+    t.fixedSeats.forEach(f=>fixList.append(el("div",{class:"hrow"},
+      el("span",{class:"chip chip-v",text:"固定"}),
+      el("b",{text:nameOf(f.no)}),
+      el("span",{style:{color:"var(--ink2)",fontSize:"13px"},text:"→ "+seatLabel(f.seatId)}),
+      el("span",{class:"spacer",style:{flex:"1"}}),
+      el("button",{class:"btn btn-sm btn-danger",onclick:()=>{
+        t.fixedSeats=t.fixedSeats.filter(x=>x!==f);store.save(t);drawFix();drawPicker()}},"解除"))));
+  };drawFix();
+
+  const ngList=el("div",{class:"hist"});
+  const drawNg=()=>{
+    ngList.innerHTML="";
+    if(!t.ngPairs.length)ngList.append(el("p",{style:{color:"var(--ink3)",fontSize:"13px"},text:"NGペアはまだありません。"}));
+    t.ngPairs.forEach(p=>ngList.append(el("div",{class:"hrow"},
+      el("span",{class:"chip chip-a",text:"NG"}),
+      el("b",{text:nameOf(p[0])}),el("span",{style:{color:"var(--ink3)"},text:"－"}),el("b",{text:nameOf(p[1])}),
+      el("span",{style:{flex:"1"}}),
+      el("button",{class:"btn btn-sm btn-danger",onclick:()=>{
+        t.ngPairs=t.ngPairs.filter(x=>x!==p);store.save(t);drawNg()}},"解除"))));
+  };drawNg();
+
+  const stuOpts=()=>t.roster.map(s=>el("option",{value:s.no},`${s.no}. ${s.name}`));
+  const fS=el("select",{class:"input"},...stuOpts());
+  const n1=el("select",{class:"input"},...stuOpts());
+  const n2=el("select",{class:"input"},...stuOpts());
+
+  // 座席固定：テキストのプルダウンではなく、座席レイアウトを模したグリッドから直接クリックして選ぶ
+  let pickedSeatId=null;
+  const pickGrid=el("div",{style:{display:"grid",gap:"4px",
+    gridTemplateColumns:`repeat(${t.layout.cols},minmax(28px,1fr))`}});
+  const pickNote=el("div",{style:{fontSize:"12.5px",color:"var(--ink2)",marginTop:"8px"}});
+  function drawPicker(){
+    pickGrid.innerHTML="";
+    t.layout.seats.slice().sort((a,b)=>a.row-b.row||a.col-b.col).forEach(s=>{
+      if(!s.enabled){pickGrid.append(el("div",{class:"lay-seat off",text:`${s.row+1}-${s.col+1}`}));return}
+      const takenBy=t.fixedSeats.find(f=>f.seatId===s.id);
+      pickGrid.append(el("button",{
+        class:"lay-seat"+(pickedSeatId===s.id?" picked":"")+(takenBy?" taken":""),
+        title:takenBy?`固定済み：${nameOf(takenBy.no)}`:`前から${s.row+1}列目・${s.col+1}番を選ぶ`,
+        onclick:()=>{pickedSeatId=s.id;drawPicker()}
+      },takenBy?nameOf(takenBy.no):`${s.row+1}-${s.col+1}`));
+    });
+    pickNote.textContent=pickedSeatId?`選択中の座席：${seatLabel(pickedSeatId)}`:"座席レイアウトから固定したい席をクリックしてください。";
+  }
+  drawPicker();
+
+  return el("div",{class:"panel"},
+    el("div",{class:"box"},
+      el("h3",{text:"座席固定"}),
+      el("p",{class:"hint",text:"特定の生徒を特定の座席へ固定します。ランダム配置でも必ず守られます。"}),
+      el("label",{class:"field"},el("span",{text:"生徒"}),fS),
+      el("label",{class:"field"},el("span",{text:"座席（座席レイアウトから選択）"}),
+        el("div",{style:{overflowX:"auto"}},pickGrid),pickNote),
+      el("button",{class:"btn btn-primary",style:{marginTop:"12px",marginBottom:"16px"},onclick:()=>{
+        const no=+fS.value,sid=pickedSeatId;
+        if(!sid)return toast("座席を選んでください");
+        if(t.fixedSeats.some(f=>f.no===no||f.seatId===sid))return toast("すでに固定されています");
+        t.fixedSeats.push({no,seatId:sid});store.save(t);drawFix();drawPicker();toast("固定しました");
+      }},"固定する"),
+      fixList),
+    el("div",{class:"box"},
+      el("h3",{text:"NGペア"}),
+      el("p",{class:"hint",text:"前後左右で隣り合わせにしない組み合わせを登録します（斜めは対象外）。"}),
+      el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:"10px",alignItems:"end",marginBottom:"16px"}},
+        el("label",{class:"field",style:{marginBottom:0}},el("span",{text:"生徒 A"}),n1),
+        el("label",{class:"field",style:{marginBottom:0}},el("span",{text:"生徒 B"}),n2),
+        el("button",{class:"btn btn-primary",onclick:()=>{
+          const a=+n1.value,b=+n2.value;
+          if(a===b)return toast("同じ生徒は登録できません");
+          if(t.ngPairs.some(p=>p.includes(a)&&p.includes(b)))return toast("すでに登録されています");
+          t.ngPairs.push([a,b]);store.save(t);drawNg();toast("NGペアを登録しました");
+        }},"登録する")),
+      ngList));
+}
+
+/* --- 座席表履歴 --- */
+function paneHistory(t){
+  const rows=t.charts.length? t.charts.map(c=>{
+    const placed=Object.keys(c.assign).length;
+    return el("div",{class:"hrow"},
+      el("div",{style:{minWidth:"128px"}},
+        el("div",{class:"date",text:jpDate(c.startDate)+"〜"}),
+        el("div",{class:"when",text:"更新 "+jpDT(c.updatedAt)})),
+      el("div",{style:{flex:"1",minWidth:"0"}},
+        el("div",{style:{fontWeight:"700"},text:c.name||"（名称未設定）"}),
+        el("div",{style:{fontSize:"12px",color:"var(--ink3)"},
+          text:`配置 ${placed} / ${c.layout.seats.filter(s=>s.enabled).length}席`+(c.endDate?`　終了 ${jpDate(c.endDate)}`:"")})),
+      el("button",{class:"btn btn-sm btn-primary",onclick:()=>go({view:"edit",chartId:c.id})},"開く"),
+      el("button",{class:"btn btn-sm",onclick:()=>{
+        const d=clone(c);d.id=uid("ch");d.name=(c.name||jpDate(c.startDate))+"（複製）";
+        d.createdAt=d.updatedAt=Date.now();t.charts.unshift(d);store.save(t);go({});toast("複製しました");
+      }},"複製"),
+      el("button",{class:"btn btn-sm",onclick:()=>{
+        const i=el("input",{class:"input",value:c.name||""});
+        modal({title:"名称を変更",body:el("label",{class:"field"},el("span",{text:"座席表の名称"}),i),
+          footer:[el("button",{class:"btn",onclick:closeModal},"キャンセル"),
+            el("button",{class:"btn btn-primary",onclick:()=>{c.name=i.value.trim();store.save(t);closeModal();go({})}},"保存")]});
+      }},"名称変更"),
+      el("button",{class:"btn btn-sm btn-danger",onclick:()=>{
+        modal({title:"この座席表を削除しますか？",desc:jpDate(c.startDate)+"〜 の座席表を削除します。元に戻せません。",
+          body:el("div",{class:"alert"},el("h4",{text:"削除の確認"}),el("div",{text:"削除すると、この履歴の座席配置は失われます。"})),
+          footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
+            el("button",{class:"btn btn-danger",onclick:()=>{t.charts=t.charts.filter(x=>x!==c);store.save(t);closeModal();go({});toast("削除しました")}},"削除する")]});
+      }},"削除"));
+  }) : [el("div",{class:"empty"},el("h3",{text:"座席表はまだありません"}),
+        el("p",{text:"「新しい座席表を作成」から、開始日を決めて1枚目を作りましょう。"}))];
+  return el("div",{class:"box"},
+    el("h3",{text:"座席表履歴"}),
+    el("p",{class:"hint",text:"1つのテンプレートで、期間ごとの座席表を何枚でも管理できます。"}),
+    el("div",{class:"hist"},...rows));
+}
+
+function dlgNewChart(t){
+  if(!t.roster.length)return dlgError("座席表を作成できません",["名簿が登録されていません","「名簿管理」からCSVを読み込んでください"]);
+  const sd=el("input",{class:"input",type:"date",value:todayISO()});
+  const ed=el("input",{class:"input",type:"date"});
+  const nm=el("input",{class:"input",placeholder:"例：1学期後半"});
+  const copyPrev=t.charts.length? el("label",{class:"check"},
+    el("input",{type:"checkbox"}),el("div",{},el("b",{text:"直前の座席表の配置を引き継ぐ"}),
+      el("small",{text:jpDate(t.charts[0].startDate)+"〜 の配置をコピーして始めます"}))) : null;
+  modal({title:"新しい座席表を作成",desc:"開始日は印刷時に右上へ表示されます。",
+    body:el("div",{},
+      el("label",{class:"field"},el("span",{text:"開始日（必須）"}),sd),
+      el("label",{class:"field"},el("span",{text:"終了日（任意）"}),ed),
+      el("label",{class:"field"},el("span",{text:"名称（任意）"}),nm),
+      copyPrev,
+      el("div",{class:"note",html:`この座席表は、いまの座席レイアウト（<b>${t.layout.seats.filter(s=>s.enabled).length}席</b>）で作成されます。あとでレイアウトを変えても、この座席表は変わりません。`})),
+    footer:[el("button",{class:"btn",onclick:closeModal},"キャンセル"),
+      el("button",{class:"btn btn-primary",onclick:()=>{
+        if(!sd.value)return toast("開始日を入力してください");
+        const c=newChart(t,sd.value);c.endDate=ed.value;c.name=nm.value.trim();
+        if(copyPrev&&copyPrev.querySelector("input").checked){
+          const prev=t.charts[0];
+          Object.entries(prev.assign).forEach(([sid,no])=>{
+            if(c.layout.seats.some(s=>s.id===sid&&s.enabled))c.assign[sid]=no;});
+        }
+        t.charts.unshift(c);store.save(t);closeModal();go({view:"edit",chartId:c.id});
+      }},"作成して編集する")]});
+}
+
+/* =====================================================================
+   画面 3 — 座席表編集
+   ===================================================================== */
+const E={mode:"place",sel:null,q:"",unplacedOnly:false,undo:[],redo:[]};
+const MAXHIST=60;
+
+function ctx(){
+  const t=store.get(R.tplId); if(!t)return null;
+  const c=t.charts.find(x=>x.id===R.chartId); if(!c)return null;
+  return {t,c};
+}
+function pushUndo(label){
+  const k=ctx(); if(!k)return;
+  E.undo.push({assign:clone(k.c.assign),room:clone(k.c.room),
+               fixed:clone(k.c.fixedSeats),label});
+  if(E.undo.length>MAXHIST)E.undo.shift();
+  E.redo.length=0;
+}
+function applySnap(s){
+  const k=ctx(); k.c.assign=clone(s.assign);k.c.room=clone(s.room);k.c.fixedSeats=clone(s.fixed);
+}
+function snapNow(){const k=ctx();return{assign:clone(k.c.assign),room:clone(k.c.room),fixed:clone(k.c.fixedSeats)}}
+function doUndo(){
+  if(!E.undo.length)return toast("これ以上戻せません");
+  const cur=snapNow();const s=E.undo.pop();E.redo.push(cur);applySnap(s);
+  store.save(ctx().t);renderEditorBody();toast("元に戻しました"+(s.label?`：${s.label}`:""));
+}
+function doRedo(){
+  if(!E.redo.length)return toast("やり直す操作がありません");
+  const cur=snapNow();const s=E.redo.pop();E.undo.push(cur);applySnap(s);
+  store.save(ctx().t);renderEditorBody();toast("やり直しました");
+}
+
+function viewEditor(){
+  const k=ctx(); if(!k)return go({view:"tpl"});
+  const{t,c}=k;
+  t.print.facing=t.print.facing||"student";  // 旧データ互換
+  const seg=(key,opts)=>{const s=el("div",{class:"seg"});
+    opts.forEach(([v,l])=>s.append(el("button",{"aria-pressed":String(t.print[key]===v),
+      onclick:e=>{
+        t.print[key]=v;store.save(t);
+        [...s.children].forEach(b=>b.setAttribute("aria-pressed",String(b===e.target)));
+        renderEditorBody();
+      }},l)));return s};
+
+  const bar=el("div",{class:"toolbar no-print"},
+    el("button",{class:"btn btn-sm",onclick:()=>{E.mode="place";E.sel=null;go({view:"tpl",tab:"history"})}},"← 履歴へ戻る"),
+    el("div",{class:"div"}),
+    el("button",{class:"btn",onclick:()=>dlgRandom(t,c)},"ランダム配置"),
+    el("button",{class:"btn"+(E.mode==="swap"?" on":""),onclick:()=>{
+      E.mode=E.mode==="swap"?"place":"swap";E.sel=null;renderEditorBody();
+      toast(E.mode==="swap"?"交換モード：2つの席を順にクリック":"交換モードを終了しました");
+    }},"交換モード"),
+    el("button",{class:"btn"+(E.mode==="room"?" on":""),onclick:()=>{
+      E.mode=E.mode==="room"?"place":"room";E.sel=null;renderEditorBody();
+      toast(E.mode==="room"?"教室レイアウト編集：ドラッグで移動、×で削除":"教室レイアウト編集を終了しました");
+    }},"教室レイアウト"),
+    el("div",{class:"div"}),
+    el("button",{class:"btn btn-sm",title:"Ctrl+Z",disabled:!E.undo.length,onclick:doUndo},"↶ 元に戻す"),
+    el("button",{class:"btn btn-sm",title:"Ctrl+Y",disabled:!E.redo.length,onclick:doRedo},"↷ やり直し"),
+    el("div",{class:"div"}),
+    seg("paper",[["A4","A4"],["B5","B5"]]),
+    seg("orient",[["portrait","縦"],["landscape","横"]]),
+    seg("facing",[["student","生徒側"],["teacher","教員側"]]),
+    el("div",{style:{flex:"1"}}),
+    el("span",{class:"tool-note",id:"cnt"}),
+    el("button",{class:"btn",onclick:()=>{store.save(t);c.updatedAt=Date.now();renderEditorBody();toast("保存しました")}},"保存"),
+    el("button",{class:"btn btn-primary",onclick:dlgPrintPreview},"印刷 / PDF"));
+
+  return el("div",{class:"ed"},bar,el("div",{class:"ed-body",id:"edbody"}));
+}
+
+function renderEditorBody(){
+  const host=$("#edbody"); if(!host)return go({});
+  const k=ctx(); const{t,c}=k;
+  host.className="ed-body mode-"+E.mode;
+  host.innerHTML="";
+  host.append(sheetPane(t,c),cardPane(t,c));
+  const placed=Object.keys(c.assign).length, cap=c.layout.seats.filter(s=>s.enabled).length;
+  const cnt=$("#cnt"); if(cnt)cnt.textContent=`配置 ${placed} / ${cap}席・名簿 ${t.roster.length}名`;
+  requestAnimationFrame(fitSheet);
+  // ツールバーの活性を更新
+  const bar=$(".toolbar"); if(bar){
+    const bs=bar.querySelectorAll("button");
+    bs.forEach(b=>{if(b.textContent.includes("元に戻す"))b.disabled=!E.undo.length;
+                   if(b.textContent.includes("やり直し"))b.disabled=!E.redo.length});
+  }
+}
+
+/* ---- 用紙・座席の自動フィット ---- */
+let FIT={print:false};
+function fitSheet(){
+  const pad=$(".canvas-pad"),sheet=$(".sheet"); if(!pad||!sheet)return;
+  const k=ctx(); if(!k)return; const{t,c}=k;
+  const ar=paperAR(t.print.paper,t.print.orient);
+  let sw,sh;
+  if(FIT.print){
+    const mm=96/25.4,d=PAPER[t.print.paper],MG=16; // @page margin 8mm × 2
+    sw=((t.print.orient==="landscape"?d.h:d.w)-MG)*mm;
+    sh=((t.print.orient==="landscape"?d.w:d.h)-MG)*mm;
+  }else{
+    const cs=getComputedStyle(pad);
+    const availW=pad.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
+    const availH=pad.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
+    sh=Math.min(availH,availW/ar); sw=sh*ar;
+  }
+  sheet.style.width=sw+"px"; sheet.style.height=sh+"px";
+  const padPx=sw*0.032;
+  sheet.style.setProperty("--pad",padPx+"px");
+  sheet.style.setProperty("--fs-hd",Math.max(7,sw*0.0195)+"px");
+  const head=sheet.querySelector(".sheet-head");
+  const roomW=sw-padPx*2, roomH=sh-padPx*2-(head?head.offsetHeight+padPx:0);
+  const L=c.layout, ASPECT=1.34, GAPR=0.10;
+  const cw1=roomW/(L.cols+GAPR*(L.cols-1));
+  const gridH=roomH*0.80;
+  const ch1=gridH/(L.rows+GAPR*(L.rows-1));
+  const cw=Math.min(cw1,ch1*ASPECT), ch=cw/ASPECT, gap=cw*GAPR;
+  sheet.style.setProperty("--cw",cw+"px");
+  sheet.style.setProperty("--ch",ch+"px");
+  sheet.style.setProperty("--gap",gap+"px");
+  sheet.style.setProperty("--fs-name",Math.max(5,Math.min(cw*0.235,26))+"px");
+  sheet.style.setProperty("--fs-sub",Math.max(4,Math.min(cw*0.115,12))+"px");
+  sheet.style.setProperty("--fs-room",Math.max(5,Math.min(cw*0.17,15))+"px");
+  const grid=sheet.querySelector(".seatgrid");
+  if(grid){
+    // 教員側（教卓から見た図）では黒板・教卓が下側に反転移動するため、座席グリッドは上側の80%に配置して重ならないようにする。
+    // .seatgridはinset:0（top/right/bottom/left=0）が既定なので、top・bottomの両方を明示して高さ80%の領域に固定する。
+    const teacher=t.print.facing==="teacher";
+    grid.style.top=(teacher?0:roomH*0.20)+"px";
+    grid.style.bottom=(teacher?roomH*0.20:0)+"px";
+  }
+  fitSeatNames();
+}
+
+/* 氏名・ローマ字の文字数に応じて座席内で1行に収まるよう自動縮小する */
+function fitSeatNames(){
+  document.querySelectorAll(".seat:not(.off) .sname, .seat:not(.off) .sromaji").forEach(n=>{
+    n.style.fontSize=""; // 基準サイズ（--fs-name / --fs-sub）へ戻してから測る
+    const seat=n.closest(".seat"); if(!seat)return;
+    const avail=seat.clientWidth-4;
+    const w=n.scrollWidth;
+    if(w>avail&&w>0){
+      const base=parseFloat(getComputedStyle(n).fontSize);
+      const scale=Math.max(0.45,avail/w); // 極端な縮小は避けつつ1行を優先
+      n.style.fontSize=(base*scale)+"px";
+    }
+  });
+}
+window.addEventListener("resize",()=>{if(R.view==="edit")fitSheet()});
+
+/* ---- 用紙ペイン ---- */
+function sheetPane(t,c){
+  const teacher=t.print.facing==="teacher";
+  const head=el("div",{class:"sheet-head"},
+    el("div",{class:"hd"},
+      el("div",{class:"d",text:jpDate(c.startDate)+"　〜"}),
+      el("div",{class:"c",text:titleOf(t)}),
+      el("div",{class:"t",text:(t.teacherName||"")+(t.teacherName?"　先生":"")})));
+
+  const room=el("div",{class:"room"});
+  (c.room||[]).forEach(ri=>room.append(roomItemEl(ri,c,teacher)));
+
+  const grid=el("div",{class:"seatgrid",style:{gridTemplateColumns:`repeat(${c.layout.cols},var(--cw))`}});
+  const byRC=[...c.layout.seats].sort((a,b)=>a.row-b.row||a.col-b.col);
+  byRC.forEach(s=>grid.append(seatEl(s,t,c,teacher)));
+  room.append(grid);
+
+  const sheet=el("div",{class:"sheet",style:{aspectRatio:String(paperAR(t.print.paper,t.print.orient))}},head,room);
+  return el("div",{class:"canvas-pad"},sheet);
+}
+
+function roomItemEl(ri,c,teacher){
+  // 教員側（教卓から見た図）は部屋を180度回転させた見え方になる。
+  // 下から順に「黒板→教卓→1列目→…」となるよう、x・yとも反転する。データ(ri.x/ri.y)は常に生徒側基準で保持する。
+  const mirrorX=v=>teacher?(100-v-ri.w):v;
+  const mirrorY=v=>teacher?(100-v-ri.h):v;
+  const n=el("div",{class:"ritem","data-kind":ri.kind,
+    style:{left:mirrorX(ri.x)+"%",top:mirrorY(ri.y)+"%",width:ri.w+"%",height:ri.h+"%"}},
+    ri.label,
+    el("button",{class:"x",title:"削除",onclick:e=>{e.stopPropagation();
+      pushUndo("教室備品の削除");c.room=c.room.filter(x=>x.id!==ri.id);store.save(ctx().t);renderEditorBody()}},"×"));
+  n.addEventListener("pointerdown",ev=>{
+    if(E.mode!=="room"||ev.target.classList.contains("x"))return;
+    ev.preventDefault(); const room=n.parentElement, rb=room.getBoundingClientRect();
+    const ox=ev.clientX-(rb.left+rb.width*mirrorX(ri.x)/100), oy=ev.clientY-(rb.top+rb.height*mirrorY(ri.y)/100);
+    pushUndo("教室備品の移動");
+    const mv=e2=>{
+      const screenX=Math.max(0,Math.min(100-ri.w,((e2.clientX-ox-rb.left)/rb.width)*100));
+      const screenY=Math.max(0,Math.min(100-ri.h,((e2.clientY-oy-rb.top)/rb.height)*100));
+      ri.x=mirrorX(screenX); ri.y=mirrorY(screenY);
+      n.style.left=screenX+"%"; n.style.top=screenY+"%";
+    };
+    const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);store.save(ctx().t)};
+    document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);
+  });
+  return n;
+}
+
+function seatEl(s,t,c,teacher){
+  const no=c.assign[s.id];
+  const st=no!=null?t.roster.find(x=>x.no===no):null;
+  const isFixed=(c.fixedSeats||[]).some(f=>f.seatId===s.id);
+  // 教員側（教卓から見た図）は部屋全体を180度回転させた見え方になるため、列・行とも反転する
+  const col=teacher?(c.layout.cols-s.col):(s.col+1);
+  const row=teacher?(c.layout.rows-s.row):(s.row+1);
+  const n=el("div",{class:"seat"+(!s.enabled?" off":st?"":" empty")+(isFixed?" fixed":"")+(E.sel===s.id?" sel":""),
+    "data-seat":s.id,style:{gridColumn:col,gridRow:row}});
+  if(!s.enabled)return n;
+  if(st){
+    n.append(el("span",{class:"sno",text:st.no}),
+             el("span",{class:"sname",text:st.name.replace(/\s+/g,"")}),
+             el("span",{class:"sromaji",text:st.romaji}));
+    n.draggable=E.mode==="place";
+  }
+  if(isFixed)n.append(el("span",{class:"stamp",text:"固定"}));
+
+  n.addEventListener("click",()=>{
+    if(E.mode==="swap"){
+      if(!E.sel){E.sel=s.id;renderEditorBody();return}
+      if(E.sel===s.id){E.sel=null;renderEditorBody();return}
+      pushUndo("座席の交換");
+      const a=E.sel,b=s.id,va=c.assign[a],vb=c.assign[b];
+      if(vb==null)delete c.assign[a];else c.assign[a]=vb;
+      if(va==null)delete c.assign[b];else c.assign[b]=va;
+      E.sel=null;store.save(t);renderEditorBody();
+      const f=document.querySelector(`[data-seat="${b}"]`);f&&f.classList.add("flash");
+      toast("席を交換しました");
+      return;
+    }
+    if(E.mode==="place"&&st)dlgSeatMenu(s,st,t,c);
+  });
+  // ドロップ受け入れ
+  n.addEventListener("dragover",e=>{if(E.mode!=="place")return;e.preventDefault();n.classList.add("drop")});
+  n.addEventListener("dragleave",()=>n.classList.remove("drop"));
+  n.addEventListener("drop",e=>{
+    e.preventDefault();n.classList.remove("drop");
+    const d=e.dataTransfer.getData("text/plain"); if(!d)return;
+    const p=JSON.parse(d);
+    placeStudent(p,s,t,c);
+  });
+  n.addEventListener("dragstart",e=>{
+    if(!st)return e.preventDefault();
+    e.dataTransfer.setData("text/plain",JSON.stringify({no:st.no,from:s.id}));
+    n.classList.add("dragging");
+  });
+  n.addEventListener("dragend",()=>n.classList.remove("dragging"));
+  return n;
+}
+
+function placeStudent(p,seat,t,c){
+  if(!seat.enabled)return;
+  const cur=c.assign[seat.id];
+  if(cur!=null&&cur!==p.no){
+    const curSt=t.roster.find(x=>x.no===cur);
+    modal({title:"席を入れ替えますか？",
+      body:el("div",{class:"note",text:`この席には ${curSt?curSt.name:"別の生徒"} さんが配置されています。入れ替えますか？`}),
+      footer:[el("button",{class:"btn",onclick:closeModal},"いいえ"),
+        el("button",{class:"btn btn-primary",onclick:()=>{closeModal();commit()}},"はい、入れ替える")]});
+    return;
+  }
+  commit();
+  function commit(){
+    pushUndo("生徒の配置");
+    if(p.from){ // 席から席へ
+      const other=c.assign[seat.id];
+      delete c.assign[p.from];
+      if(other!=null)c.assign[p.from]=other;   // 入れ替え
+    }
+    // 名前カードからの配置：元の席にいたら外す
+    for(const[sid,no]of Object.entries(c.assign)) if(no===p.no&&sid!==p.from)delete c.assign[sid];
+    c.assign[seat.id]=p.no;
+    store.save(t);renderEditorBody();
+    const f=document.querySelector(`[data-seat="${seat.id}"]`);f&&f.classList.add("flash");
+  }
+}
+
+function dlgSeatMenu(s,st,t,c){
+  const isFixed=(c.fixedSeats||[]).some(f=>f.seatId===s.id);
+  modal({title:st.name,desc:`前から${s.row+1}列目・${s.col+1}番`,
+    body:el("div",{},
+      el("div",{class:"note",style:{marginBottom:"14px"},
+        text:isFixed?"この席は固定されています。ランダム配置でも動きません。":"この席は固定されていません。"})),
+    footer:[
+      el("button",{class:"btn",onclick:closeModal},"閉じる"),
+      el("button",{class:"btn",onclick:()=>{
+        pushUndo("固定設定の変更");
+        c.fixedSeats=isFixed?c.fixedSeats.filter(f=>f.seatId!==s.id):[...c.fixedSeats,{no:st.no,seatId:s.id}];
+        store.save(t);closeModal();renderEditorBody();toast(isFixed?"固定を解除しました":"この席を固定しました");
+      }},isFixed?"固定を解除":"この席を固定する"),
+      el("button",{class:"btn btn-danger",onclick:()=>{
+        pushUndo("座席から外す");delete c.assign[s.id];
+        c.fixedSeats=c.fixedSeats.filter(f=>f.seatId!==s.id);
+        store.save(t);closeModal();renderEditorBody();toast("名前カード一覧へ戻しました");
+      }},"席から外す")]});
+}
+
+/* ---- 名前カードペイン ---- */
+function cardPane(t,c){
+  const placedNos=new Set(Object.values(c.assign));
+  const cards=el("div",{class:"cards"});
+  const cnt=el("span",{class:"cnt"});
+
+  function drawCards(){
+  const q=E.q.trim();
+  let list=t.roster.filter(s=>!q||s.name.includes(q)||s.kana.includes(q)||s.romaji.includes(q.toUpperCase()));
+  if(E.unplacedOnly)list=list.filter(s=>!placedNos.has(s.no));
+  cards.innerHTML="";
+  cnt.textContent=`${t.roster.length-placedNos.size} / ${t.roster.length} 未配置`;
+  list.forEach(s=>{
+    const placed=placedNos.has(s.no);
+    const n=el("div",{class:"card"+(placed?" placed":""),draggable:"true"},
+      el("span",{class:"no",text:s.no}),
+      el("span",{class:"g "+(s.gender==="m"?"m":"f")}),
+      el("span",{class:"nm",text:s.name}),
+      placed?el("span",{class:"chip chip-m",text:"配置済"}):null);
+    n.addEventListener("dragstart",e=>{
+      e.dataTransfer.setData("text/plain",JSON.stringify({no:s.no}));n.classList.add("dragging")});
+    n.addEventListener("dragend",()=>n.classList.remove("dragging"));
+    cards.append(n);
+  });
+  if(!list.length)cards.append(el("p",{style:{color:"var(--ink3)",fontSize:"13px",padding:"12px 2px"},
+    text:E.unplacedOnly?"全員の席が決まりました。":"該当する生徒がいません。"}));
+  }
+  drawCards();
+
+  return el("div",{class:"side no-print"},
+    el("div",{class:"side-head"},
+      el("div",{class:"r1"},el("h3",{text:"名前カード"}),cnt),
+      el("input",{class:"input",type:"search",placeholder:"氏名・ふりがなで検索",value:E.q,
+        oninput:e=>{E.q=e.target.value;drawCards()}}),
+      el("label",{class:"tog"},
+        el("input",{type:"checkbox",checked:E.unplacedOnly,style:{accentColor:"var(--indigo)",width:"17px",height:"17px"},
+          onchange:e=>{E.unplacedOnly=e.target.checked;drawCards()}}),
+        "未配置の生徒だけ表示")),
+    cards);
+}
+
+/* =====================================================================
+   ランダム配置
+   ===================================================================== */
+function dlgRandom(t,c){
+  const fixed=(c.fixedSeats||[]).filter(f=>t.roster.some(s=>s.no===f.no));
+  const nameOf=no=>t.roster.find(s=>s.no===no)?.name??`#${no}`;
+  const seatLabel=id=>{const s=c.layout.seats.find(x=>x.id===id);return s?`前から${s.row+1}列目・${s.col+1}番`:"—"};
+  const idx=t.charts.findIndex(x=>x.id===c.id);
+  const prev=t.charts[idx+1]||null;
+
+  const cbGender=el("input",{type:"checkbox"});
+  const cbPrev=el("input",{type:"checkbox",checked:!!prev,disabled:!prev});
+
+  const fixedNote = fixed.length
+    ? el("div",{class:"note"},
+        el("b",{text:"固定したまま配置します"}),
+        el("ul",{style:{margin:"7px 0 0 17px"}},
+          ...fixed.map(f=>el("li",{text:`${nameOf(f.no)}さん・${seatLabel(f.seatId)}`}))))
+    : el("div",{class:"note",text:"固定している座席・生徒はありません。すべての席をランダムに決めます。"});
+
+  modal({title:"固定する座席・生徒はありますか？",
+    desc:"基本設定の固定内容は自動で反映されます。",
+    body:el("div",{},
+      fixedNote,
+      el("div",{style:{height:"16px"}}),
+      el("div",{class:"eyebrow",style:{marginBottom:"8px"},text:"配置条件"}),
+      el("label",{class:"check"},cbGender,el("div",{},el("b",{text:"男女交互になるよう配置"}),
+        el("small",{text:"左右で隣り合う席の性別が交互になります"}))),
+      el("label",{class:"check"},cbPrev,el("div",{},el("b",{text:"前回と同じ席を禁止"}),
+        el("small",{text:prev?`前回：${jpDate(prev.startDate)}〜 の座席表と比較します`:"比較できる前回の座席表がありません"}))),
+      el("div",{class:"note",style:{fontSize:"12.5px"},
+        html:"適用順：<b>①固定席 → ②固定生徒 → ③NGペア → ④前回と同じ席禁止 → ⑤男女交互 → ⑥残りをランダム</b>。上位の条件を破ることはありません。"})),
+    footer:[el("button",{class:"btn",onclick:closeModal},"キャンセル"),
+      el("button",{class:"btn btn-primary",onclick:()=>{
+        const res=solve(t,c,{gender:cbGender.checked,noPrev:cbPrev.checked&&!!prev,prev});
+        if(!res.ok){closeModal();return dlgError("条件を満たす座席配置を作成できませんでした",res.causes)}
+        pushUndo("ランダム配置");
+        c.assign=res.assign;store.save(t);closeModal();renderEditorBody();
+        toast("ランダム配置しました");
+      }},"この条件で配置する")]});
+}
+
+/* --- バックトラッキング法による配置生成 --- */
+function solve(t,c,opt){
+  const seats=[...c.layout.seats].filter(s=>s.enabled).sort((a,b)=>a.row-b.row||a.col-b.col);
+  const roster=t.roster;
+  if(roster.length>seats.length)
+    return{ok:false,causes:[`名簿${roster.length}名に対して座席が${seats.length}席しかありません`,"座席レイアウトで席を追加してください"]};
+
+  const byRC=new Map(seats.map(s=>[`${s.row}:${s.col}`,s]));
+  const idxOf=new Map(seats.map((s,i)=>[s.id,i]));
+  const ng=new Map();
+  (c.ngPairs||t.ngPairs||[]).forEach(([a,b])=>{
+    if(!ng.has(a))ng.set(a,new Set());if(!ng.has(b))ng.set(b,new Set());
+    ng.get(a).add(b);ng.get(b).add(a);
+  });
+  const gender=new Map(roster.map(s=>[s.no,s.gender]));
+
+  // ① 固定席・② 固定生徒
+  const assign=new Array(seats.length).fill(undefined);
+  const used=new Set();
+  for(const f of (c.fixedSeats||[])){
+    const i=idxOf.get(f.seatId);
+    if(i==null)continue;
+    if(!roster.some(s=>s.no===f.no))continue;
+    if(assign[i]!==undefined)return{ok:false,causes:["同じ座席に複数の生徒が固定されています","「固定席・NGペア」で重複を解除してください"]};
+    assign[i]=f.no;used.add(f.no);
+  }
+  const pool=roster.filter(s=>!used.has(s.no)).map(s=>s.no);
+  const blanks=seats.length-roster.length;           // 空席
+  const openIdx=[];for(let i=0;i<seats.length;i++)if(assign[i]===undefined)openIdx.push(i);
+
+  function neighbors(i){
+    const s=seats[i],out=[];
+    [[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr,dc])=>{
+      const n=byRC.get(`${s.row+dr}:${s.col+dc}`);
+      if(n)out.push({i:idxOf.get(n.id),lr:dc!==0});
+    });
+    return out;
+  }
+  const NB=seats.map((_,i)=>neighbors(i));
+
+  /* 制約は優先順位つきの述語リストとして管理する。
+     将来、視力配慮・支援配慮・仲良しペア等を追加する場合は、
+     seat.tags / roster側のタグ等を見る述語をこのリストに1つ足すだけでよい。 */
+  const SEAT_CONSTRAINTS=[   // その席単体で決まる制約（④）
+    {name:"前回と同じ席禁止",ok:(i,no)=>!(opt.noPrev&&opt.prev&&opt.prev.assign[seats[i].id]===no)},
+  ];
+  const PAIR_CONSTRAINTS=[   // 隣接する2席の関係で決まる制約（③⑤）
+    {name:"NGペア",ok:(no,other)=>!ng.get(no)?.has(other)},
+    {name:"男女交互",lrOnly:true,ok:(no,other)=>!(opt.gender&&gender.get(no)===gender.get(other))},
+  ];
+  function fits(i,no,checkAll){
+    if(no==null)return true;
+    if(!SEAT_CONSTRAINTS.every(c=>c.ok(i,no)))return false;
+    for(const{i:j,lr}of NB[i]){
+      const other=assign[j];
+      if(other===undefined||other===null)continue;
+      if(!checkAll&&j>i&&!isFixedIdx(j))continue;    // まだ確定していない席は後で判定
+      for(const c of PAIR_CONSTRAINTS){
+        if(c.lrOnly&&!lr)continue;
+        if(!c.ok(no,other))return false;
+      }
+    }
+    return true;
+  }
+  const fixedIdx=new Set();seats.forEach((s,i)=>{if(assign[i]!==undefined)fixedIdx.add(i)});
+  function isFixedIdx(i){return fixedIdx.has(i)}
+
+  // ①② 固定どうしがすでに条件へ違反していないか検査
+  for(let i=0;i<seats.length;i++) if(assign[i]!==undefined&&!fits(i,assign[i],true))
+    return{ok:false,causes:["固定席どうしが条件に違反しています（NGペアが隣接、または男女交互が成立しない）","固定席の位置を見直してください"]};
+
+  // ⑥ 残りをランダムに（バックトラッキング）
+  let nodes=0;const LIMIT=400000;
+  const order=openIdx.slice();          // 行優先＝左と上が確定済みになり枝刈りが効く
+  const items=shuffle(pool.concat(new Array(blanks).fill(null)));
+
+  function bt(k,rest){
+    if(++nodes>LIMIT)return"limit";
+    if(k===order.length)return true;
+    const i=order[k];
+    const seen=new Set();
+    for(let x=0;x<rest.length;x++){
+      const v=rest[x];
+      if(seen.has(v))continue; seen.add(v);
+      assign[i]=v;
+      if(fits(i,v,false)){
+        const r=bt(k+1,rest.slice(0,x).concat(rest.slice(x+1)));
+        if(r===true)return true; if(r==="limit")return"limit";
+      }
+      assign[i]=undefined;
+    }
+    return false;
+  }
+  const r=bt(0,items);
+  if(r!==true){
+    const causes=[];
+    if((c.ngPairs||t.ngPairs||[]).length)causes.push("NGペアが多すぎて、隣り合わせを避けられません");
+    if((c.fixedSeats||[]).length)causes.push("固定席が競合しています");
+    if(opt.gender){
+      const m=roster.filter(s=>s.gender==="m").length,f=roster.length-m;
+      causes.push(`男女交互が成立しません（男 ${m}名 / 女 ${f}名）`);
+    }
+    if(opt.noPrev)causes.push("「前回と同じ席を禁止」を満たす配置が見つかりません");
+    if(r==="limit")causes.push("条件が複雑なため、時間内に配置を作れませんでした");
+    if(!causes.length)causes.push("条件の組み合わせを満たす配置が存在しません");
+    causes.push("——　部分的な配置は採用していません。条件を1つ減らしてお試しください。");
+    return{ok:false,causes};
+  }
+  const out={};
+  seats.forEach((s,i)=>{if(assign[i]!=null)out[s.id]=assign[i]});
+  return{ok:true,assign:out};
+}
+
+/* =====================================================================
+   印刷
+   ===================================================================== */
+let PRINT_PREVIEW_OPEN=false;
+
+/* 印刷ボタン／Ctrl+P の入口。実物の.sheet要素を画面中央のオーバーレイへ一時的に
+   移動してプレビュー表示し、「はい、印刷する」を押したときだけ実際に印刷する。 */
+function dlgPrintPreview(){
+  const k=ctx(); if(!k)return; const{t}=k;
+  const sheetEl=$(".sheet"); if(!sheetEl)return;
+  const homeParent=sheetEl.parentElement, homeNext=sheetEl.nextSibling;
+
+  PRINT_PREVIEW_OPEN=true;
+  const previewBox=el("div",{class:"print-preview",style:{
+    background:"#fff",borderRadius:"10px",padding:"18px",
+    maxHeight:"76vh",maxWidth:"92vw",overflow:"auto",
+    display:"flex",justifyContent:"center",alignItems:"flex-start",
+    boxShadow:"0 20px 60px -20px rgba(0,0,0,.5)"
+  }});
+  const facingLabel=t.print.facing==="teacher"?"教員側":"生徒側";
+  const titleBar=el("div",{style:{color:"#fff",fontWeight:"700",fontSize:"15px",textAlign:"center"}},
+    `印刷プレビュー　${t.print.paper}・${t.print.orient==="portrait"?"縦":"横"}・${facingLabel}`);
+  const footer=el("div",{style:{display:"flex",gap:"10px"}},
+    el("button",{class:"btn btn-lg",onclick:()=>cancel()},"キャンセル"),
+    el("button",{class:"btn btn-primary btn-lg",onclick:()=>confirmPrint()},"はい、印刷する"));
+  const panel=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:"16px"}},
+    titleBar,previewBox,footer);
+  const backdrop=el("div",{style:{
+    position:"fixed",inset:"0",background:"rgba(22,29,41,.55)",
+    display:"flex",alignItems:"center",justifyContent:"center",zIndex:"90",padding:"24px"
+  }},panel);
+  backdrop.addEventListener("click",e=>{if(e.target===backdrop)cancel()});
+
+  previewBox.append(sheetEl); // 複製ではなく実物のDOMノードを移動する
+  document.body.append(backdrop);
+
+  FIT.print=true;
+  requestAnimationFrame(()=>{
+    fitSheet();
+    const availW=previewBox.clientWidth, availH=previewBox.clientHeight;
+    const scale=Math.min(1, availW/sheetEl.offsetWidth, availH/sheetEl.offsetHeight);
+    sheetEl.style.transform=scale<1?`scale(${scale})`:"";
+    sheetEl.style.transformOrigin="top center";
+  });
+
+  function onKey(e){ if(e.key==="Escape")cancel(); }
+  document.addEventListener("keydown",onKey);
+
+  function teardown(){
+    sheetEl.style.transform="";
+    if(homeNext)homeParent.insertBefore(sheetEl,homeNext); else homeParent.append(sheetEl);
+    backdrop.remove();
+    document.removeEventListener("keydown",onKey);
+    PRINT_PREVIEW_OPEN=false;
+  }
+  function cancel(){
+    teardown();
+    FIT.print=false;
+    requestAnimationFrame(fitSheet);
+  }
+  function confirmPrint(){
+    teardown();
+    doPrint();
+  }
+}
+
+function doPrint(){
+  const k=ctx(); if(!k)return; const{t}=k;
+  let st=document.getElementById("pagecss");
+  if(!st){st=el("style",{id:"pagecss"});document.head.append(st)}
+  st.textContent=`@page{size:${t.print.paper} ${t.print.orient};margin:8mm}`;
+  FIT.print=true;fitSheet();
+  setTimeout(()=>{window.print();FIT.print=false;requestAnimationFrame(fitSheet)},60);
+}
+window.addEventListener("afterprint",()=>{FIT.print=false;fitSheet()});
+
+/* =====================================================================
+   ルート描画
+   ===================================================================== */
+let _renderKey=null; // 直前と同じ画面/タブへの再描画ならスクロール位置を維持する
+function render(){
+  const app=$("#app");
+  const prevView=$("#view");
+  const scrollTop=prevView?prevView.scrollTop:0;
+  const key=`${R.view}|${R.tplId}|${R.chartId}|${R.tab}`;
+  const keepScroll=key===_renderKey;
+  _renderKey=key;
+
+  const t=R.tplId?store.get(R.tplId):null;
+  const c=t&&R.chartId?t.charts.find(x=>x.id===R.chartId):null;
+
+  const crumb=el("div",{class:"crumb"},
+    el("button",{class:"btn btn-sm",onclick:()=>go({view:"home",tplId:null,chartId:null})},"ホーム"),
+    t?el("span",{class:"sep",text:"›"}):null,
+    t?el("button",{class:"btn btn-sm",onclick:()=>go({view:"tpl",chartId:null})},titleOf(t)):null,
+    c?el("span",{class:"sep",text:"›"}):null,
+    c?el("b",{text:jpDate(c.startDate)+"〜"}):null);
+
+  app.innerHTML="";
+  app.append(
+    el("div",{class:"topbar no-print"},
+      el("div",{class:"brand"},el("span",{class:"mark"}),"自動座席表作成ツール"),
+      el("div",{class:"div",style:{width:"1px",height:"24px",background:"var(--line)"}}),
+      crumb, el("div",{class:"spacer"}),
+      el("span",{class:"eyebrow",text:"Prototype"})),
+    el("div",{class:"view",id:"view"}));
+
+  const v=$("#view");
+  if(R.view==="home")v.append(viewHome());
+  else if(R.view==="tpl")v.append(viewTemplate());
+  else if(R.view==="edit"){
+    if(E.chartId!==R.chartId){E.chartId=R.chartId;E.undo=[];E.redo=[];E.mode="place";E.sel=null;E.q="";E.unplacedOnly=false}
+    v.style.overflow="hidden";
+    v.append(viewEditor());
+    renderEditorBody();
+  }
+  if(keepScroll)v.scrollTop=scrollTop;
+}
+
+/* ---- キーボード ---- */
+document.addEventListener("keydown",e=>{
+  if(R.view!=="edit")return;
+  if(PRINT_PREVIEW_OPEN)return; // プレビュー中はdlgPrintPreview専用のEscハンドラのみ有効
+  const inField=/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName||"");
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"&&!e.shiftKey){e.preventDefault();doUndo()}
+  else if((e.ctrlKey||e.metaKey)&&(e.key.toLowerCase()==="y"||(e.shiftKey&&e.key.toLowerCase()==="z"))){e.preventDefault();doRedo()}
+  else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="p"){e.preventDefault();dlgPrintPreview()}
+  else if(e.key==="Escape"){
+    if($("#layer").innerHTML)closeModal();
+    else if(E.mode!=="place"){E.mode="place";E.sel=null;renderEditorBody()}
+  }
+  else if(!inField&&e.key.toLowerCase()==="s"){E.mode=E.mode==="swap"?"place":"swap";E.sel=null;renderEditorBody()}
+});
+
+/* ---- 起動 ---- */
+store.load().then(render);
+</script>
+</body>
+</html>
