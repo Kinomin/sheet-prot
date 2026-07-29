@@ -153,11 +153,15 @@ table.tbl tr:hover td{background:#f8fafd}
 .hist{display:flex;flex-direction:column;gap:9px}
 .hrow{
   display:flex;align-items:center;gap:13px;padding:12px 14px;border:1.5px solid var(--line);
-  border-radius:11px;background:var(--card);
+  border-radius:11px;background:var(--card);flex-wrap:wrap;
 }
 .hrow:hover{border-color:var(--indigo)}
 .hrow .date{font-family:var(--mono);font-weight:700;font-size:14px;letter-spacing:-.01em}
 .hrow .when{font-size:11.5px;color:var(--ink3);font-family:var(--mono)}
+.hrow-info{flex:1;min-width:0}
+.hrow-main{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.hrow-sub{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--ink3);margin-top:2px}
+.hrow-actions{display:flex;gap:7px;flex-wrap:wrap}
 
 /* ---------- 座席表エディタ ---------- */
 .ed{display:flex;flex-direction:column;height:100%;min-height:0}
@@ -229,7 +233,10 @@ table.tbl tr:hover td{background:#f8fafd}
 .ritem[data-kind="blackboard"]{background:#2f3b34;color:#fff;border-color:#2f3b34}
 .ritem[data-kind="podium"]{background:#f1f3f7}
 .ritem[data-kind="in"],.ritem[data-kind="out"]{background:#fff;border-style:dashed}
-.mode-room .ritem{cursor:move;box-shadow:0 0 0 2px var(--indigo-t)}
+/* 教室レイアウト編集中は、座席グリッド（.seatgridはinset:0で部屋全体を覆う）が
+   下にある備品のクリックを奪ってしまうため、グリッド側の当たり判定を無効にする */
+.mode-room .seatgrid{pointer-events:none}
+.mode-room .ritem{cursor:move;box-shadow:0 0 0 2px var(--indigo-t);z-index:5}
 .mode-room .ritem:hover{border-color:var(--indigo)}
 .ritem .x{
   position:absolute;top:-9px;right:-9px;width:20px;height:20px;border-radius:50%;
@@ -299,6 +306,43 @@ table.tbl tr:hover td{background:#f8fafd}
 @media (max-width:900px){
   .panel{grid-template-columns:1fr}
   .side{flex:0 0 232px}
+}
+
+/* ---------- スマホ ---------- */
+@media (max-width:640px){
+  .wrap{padding:20px 14px 60px}
+  /* 履歴の行：情報と操作ボタンを上下に分け、ボタンは幅いっぱいに均等配置して枠外にはみ出さないようにする */
+  .hrow{align-items:stretch}
+  .hrow-info,.hrow-actions{flex:1 1 100%}
+  .hrow-actions .btn{flex:1;min-width:0;padding:0 8px}
+
+  /* 座席表エディタ：名前カードを横並びの下段に回し、座席表に画面の大半を使う */
+  .ed-body{flex-direction:column}
+  .canvas-pad{padding:8px;min-height:0}
+  .side{
+    flex:0 0 auto;max-height:31vh;border-left:none;border-top:1.5px solid var(--line);
+  }
+  .side-head{padding:9px 12px 7px}
+  .side-head .r1{margin-bottom:7px}
+  .side-head label.tog{margin-top:7px}
+  .cards{flex-direction:row;flex-wrap:wrap;align-content:flex-start;padding:9px 12px 16px;gap:6px}
+  .card{flex:0 0 auto;padding:7px 9px;gap:6px}
+  .card .no{width:auto}
+  .card .nm{font-size:13.5px;flex:0 0 auto}
+  /* ツールバーは折り返すと5段にもなり座席表を圧迫するため、1段の横スクロールにする */
+  .toolbar{padding:6px 10px;gap:6px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
+  .toolbar > *{flex:0 0 auto}
+  .toolbar .btn{min-height:38px;padding:0 11px;font-size:13.5px}
+  .toolbar .btn-sm{min-height:34px}
+  .toolbar .seg button{min-height:34px;padding:0 11px;font-size:13px}
+  .toolbar .div{display:none}
+  .tool-note{font-size:11px;white-space:nowrap}
+
+  /* 上部バーは幅が足りず重なるので、装飾ラベルを省いてパンくずを優先する */
+  .topbar{height:52px;padding:0 12px;gap:9px}
+  .topbar .eyebrow{display:none}
+  .brand{font-size:14px}
+  .crumb{font-size:12.5px;overflow-x:auto;white-space:nowrap}
 }
 
 /* ---------- 印刷 ---------- */
@@ -1115,7 +1159,8 @@ function paneRules(t){
       el("h3",{text:"座席固定"}),
       el("p",{class:"hint",text:"特定の生徒を特定の座席へ固定します。ランダム配置でも必ず守られます。"}),
       el("label",{class:"field"},el("span",{text:"生徒"}),fS),
-      el("label",{class:"field"},el("span",{text:"座席（座席レイアウトから選択）"}),
+      // labelで包むと、中の座席ボタン（labelable要素）へクリックが転送され席を選べなくなるためdivを使う
+      el("div",{class:"field"},el("span",{text:"座席（座席レイアウトから選択）"}),
         el("div",{style:{overflowX:"auto"}},pickGrid),pickNote),
       el("button",{class:"btn btn-primary",style:{marginTop:"12px",marginBottom:"16px"},onclick:()=>{
         const no=+fS.value,sid=pickedSeatId;
@@ -1144,30 +1189,32 @@ function paneHistory(t){
   const rows=t.charts.length? t.charts.map(c=>{
     const placed=Object.keys(c.assign).length;
     return el("div",{class:"hrow"},
-      el("div",{style:{minWidth:"128px"}},
-        el("div",{class:"date",text:jpDate(c.startDate)+"〜"}),
-        el("div",{class:"when",text:"更新 "+jpDT(c.updatedAt)})),
-      el("div",{style:{flex:"1",minWidth:"0"}},
-        el("div",{style:{fontWeight:"700"},text:c.name||"（名称未設定）"}),
-        el("div",{style:{fontSize:"12px",color:"var(--ink3)"},
-          text:`配置 ${placed} / ${c.layout.seats.filter(s=>s.enabled).length}席`+(c.endDate?`　終了 ${jpDate(c.endDate)}`:"")})),
-      el("button",{class:"btn btn-sm btn-primary",onclick:()=>go({view:"edit",chartId:c.id})},"開く"),
-      el("button",{class:"btn btn-sm",onclick:()=>{
-        const d=clone(c);d.id=uid("ch");d.name=(c.name||jpDate(c.startDate))+"（複製）";
-        d.createdAt=d.updatedAt=Date.now();t.charts.unshift(d);store.save(t);go({});toast("複製しました");
-      }},"複製"),
-      el("button",{class:"btn btn-sm",onclick:()=>{
-        const i=el("input",{class:"input",value:c.name||""});
-        modal({title:"名称を変更",body:el("label",{class:"field"},el("span",{text:"座席表の名称"}),i),
-          footer:[el("button",{class:"btn",onclick:closeModal},"キャンセル"),
-            el("button",{class:"btn btn-primary",onclick:()=>{c.name=i.value.trim();store.save(t);closeModal();go({})}},"保存")]});
-      }},"名称変更"),
-      el("button",{class:"btn btn-sm btn-danger",onclick:()=>{
-        modal({title:"この座席表を削除しますか？",desc:jpDate(c.startDate)+"〜 の座席表を削除します。元に戻せません。",
-          body:el("div",{class:"alert"},el("h4",{text:"削除の確認"}),el("div",{text:"削除すると、この履歴の座席配置は失われます。"})),
-          footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
-            el("button",{class:"btn btn-danger",onclick:()=>{t.charts=t.charts.filter(x=>x!==c);store.save(t);closeModal();go({});toast("削除しました")}},"削除する")]});
-      }},"削除"));
+      el("div",{class:"hrow-info"},
+        el("div",{class:"hrow-main"},
+          el("span",{class:"date",text:jpDate(c.startDate)+"〜"}),
+          el("span",{style:{fontWeight:"700"},text:c.name||"（名称未設定）"})),
+        el("div",{class:"hrow-sub"},
+          el("span",{text:`配置 ${placed} / ${c.layout.seats.filter(s=>s.enabled).length}席`}),
+          c.endDate?el("span",{text:"終了 "+jpDate(c.endDate)}):null,
+          el("span",{text:"更新 "+jpDT(c.updatedAt)}))),
+      el("div",{class:"hrow-actions"},
+        el("button",{class:"btn btn-sm btn-primary",onclick:()=>go({view:"edit",chartId:c.id})},"開く"),
+        el("button",{class:"btn btn-sm",onclick:()=>{
+          const d=clone(c);d.id=uid("ch");d.name=(c.name||jpDate(c.startDate))+"（複製）";
+          d.createdAt=d.updatedAt=Date.now();t.charts.unshift(d);store.save(t);go({});toast("複製しました");
+        }},"複製"),
+        el("button",{class:"btn btn-sm",onclick:()=>{
+          const i=el("input",{class:"input",value:c.name||""});
+          modal({title:"名称を変更",body:el("label",{class:"field"},el("span",{text:"座席表の名称"}),i),
+            footer:[el("button",{class:"btn",onclick:closeModal},"キャンセル"),
+              el("button",{class:"btn btn-primary",onclick:()=>{c.name=i.value.trim();store.save(t);closeModal();go({})}},"保存")]});
+        }},"名称変更"),
+        el("button",{class:"btn btn-sm btn-danger",onclick:()=>{
+          modal({title:"この座席表を削除しますか？",desc:jpDate(c.startDate)+"〜 の座席表を削除します。元に戻せません。",
+            body:el("div",{class:"alert"},el("h4",{text:"削除の確認"}),el("div",{text:"削除すると、この履歴の座席配置は失われます。"})),
+            footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
+              el("button",{class:"btn btn-danger",onclick:()=>{t.charts=t.charts.filter(x=>x!==c);store.save(t);closeModal();go({});toast("削除しました")}},"削除する")]});
+        }},"削除")));
   }) : [el("div",{class:"empty"},el("h3",{text:"座席表はまだありません"}),
         el("p",{text:"「新しい座席表を作成」から、開始日を決めて1枚目を作りましょう。"}))];
   return el("div",{class:"box"},
@@ -1375,6 +1422,33 @@ function sheetPane(t,c){
   return el("div",{class:"canvas-pad"},sheet);
 }
 
+/* 実際に並んでいる座席の外接矩形を、部屋に対する%で返す */
+function seatBoundsPct(room){
+  const seats=[...room.querySelectorAll(".seat:not(.off)")];
+  const rb=room.getBoundingClientRect();
+  if(!seats.length||!rb.width||!rb.height)return null;
+  let l=Infinity,t=Infinity,r=-Infinity,b=-Infinity;
+  seats.forEach(s=>{const q=s.getBoundingClientRect();
+    l=Math.min(l,q.left);t=Math.min(t,q.top);r=Math.max(r,q.right);b=Math.max(b,q.bottom)});
+  return {l:(l-rb.left)/rb.width*100, t:(t-rb.top)/rb.height*100,
+          r:(r-rb.left)/rb.width*100, b:(b-rb.top)/rb.height*100};
+}
+
+/* 座席の並びと重なっている場合、いちばん近い外側（上下左右）へ押し出した座標を返す */
+function pushOutOfSeats(x,y,w,h,sb){
+  if(!sb)return{x,y};
+  if(!(x<sb.r&&x+w>sb.l&&y<sb.b&&y+h>sb.t))return{x,y};
+  const cands=[
+    {x,        y:sb.t-h, d:(y+h)-sb.t},
+    {x,        y:sb.b,   d:sb.b-y},
+    {x:sb.l-w, y,        d:(x+w)-sb.l},
+    {x:sb.r,   y,        d:sb.r-x},
+  ].filter(p=>p.x>=0&&p.y>=0&&p.x<=100-w&&p.y<=100-h);
+  if(!cands.length)return{x,y};
+  const best=cands.reduce((a,b)=>a.d<b.d?a:b);
+  return{x:best.x,y:best.y};
+}
+
 function roomItemEl(ri,c,teacher){
   // 教員側（教卓から見た図）は部屋を180度回転させた見え方になる。
   // 下から順に「黒板→教卓→1列目→…」となるよう、x・yとも反転する。データ(ri.x/ri.y)は常に生徒側基準で保持する。
@@ -1396,7 +1470,14 @@ function roomItemEl(ri,c,teacher){
       ri.x=mirrorX(screenX); ri.y=mirrorY(screenY);
       n.style.left=screenX+"%"; n.style.top=screenY+"%";
     };
-    const up=()=>{document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);store.save(ctx().t)};
+    const up=()=>{
+      document.removeEventListener("pointermove",mv);document.removeEventListener("pointerup",up);
+      // 指を離した時点で座席と重なっていたら、いちばん近い外側へ自動で逃がす
+      const cur=pushOutOfSeats(mirrorX(ri.x),mirrorY(ri.y),ri.w,ri.h,seatBoundsPct(room));
+      ri.x=mirrorX(cur.x); ri.y=mirrorY(cur.y);
+      n.style.left=cur.x+"%"; n.style.top=cur.y+"%";
+      store.save(ctx().t);
+    };
     document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);
   });
   return n;
@@ -1512,13 +1593,15 @@ function cardPane(t,c){
   if(E.unplacedOnly)list=list.filter(s=>!placedNos.has(s.no));
   cards.innerHTML="";
   cnt.textContent=`${t.roster.length-placedNos.size} / ${t.roster.length} 未配置`;
+  // スマホでは座席表を大きく見せたいので、名前カードは「番号＋苗字」だけの省スペース表示にする
+  const narrow=window.matchMedia("(max-width:640px)").matches;
   list.forEach(s=>{
     const placed=placedNos.has(s.no);
-    const n=el("div",{class:"card"+(placed?" placed":""),draggable:"true"},
+    const n=el("div",{class:"card"+(placed?" placed":""),draggable:"true",title:s.name},
       el("span",{class:"no",text:s.no}),
       el("span",{class:"g "+(s.gender==="m"?"m":"f")}),
-      el("span",{class:"nm",text:s.name}),
-      placed?el("span",{class:"chip chip-m",text:"配置済"}):null);
+      el("span",{class:"nm",text:narrow?(s.name.trim().split(/[\s　]+/)[0]):s.name}),
+      placed&&!narrow?el("span",{class:"chip chip-m",text:"配置済"}):null);
     n.addEventListener("dragstart",e=>{
       e.dataTransfer.setData("text/plain",JSON.stringify({no:s.no}));n.classList.add("dragging")});
     n.addEventListener("dragend",()=>n.classList.remove("dragging"));
