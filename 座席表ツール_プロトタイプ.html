@@ -458,11 +458,13 @@ function makeSeats(cols,rows){
   return s;
 }
 function defaultRoom(){
+  // 入口・出口は右側が既定。縦向きの用紙では座席が横幅いっぱい（0〜100%）に広がり、
+  // 空くのは上下の帯だけになるため、既定位置も上下の帯に収まるようにして重なりを防いでいる。
   return [
     {id:uid("ri"),kind:"blackboard",label:"黒　板",x:22,y:0,w:56,h:7},
     {id:uid("ri"),kind:"podium",   label:"教卓",   x:38,y:10,w:24,h:8},
-    {id:uid("ri"),kind:"in",       label:"入口",   x:2, y:2, w:14,h:7},
-    {id:uid("ri"),kind:"out",      label:"出口",   x:84,y:88,w:14,h:7},
+    {id:uid("ri"),kind:"in",       label:"入口",   x:84,y:10,w:14,h:7},
+    {id:uid("ri"),kind:"out",      label:"出口",   x:84,y:91,w:14,h:7},
   ];
 }
 function newTemplate(o={}){
@@ -1383,6 +1385,7 @@ function fitSheet(){
     grid.style.bottom=(teacher?roomH*0.20:0)+"px";
   }
   fitSeatNames();
+  avoidRoomOverlaps();
 }
 
 /* 氏名・ローマ字の文字数に応じて座席内で1行に収まるよう自動縮小する */
@@ -1459,15 +1462,21 @@ function roomItemEl(ri,c,teacher){
     ri.label,
     el("button",{class:"x",title:"削除",onclick:e=>{e.stopPropagation();
       pushUndo("教室備品の削除");c.room=c.room.filter(x=>x.id!==ri.id);store.save(ctx().t);renderEditorBody()}},"×"));
+  // 重なり回避（avoidRoomOverlaps）が参照するための、データ本体と「本来置きたい画面上の位置」
+  n.__ri=ri;
+  n.__screen={x:mirrorX(ri.x),y:mirrorY(ri.y)};
   n.addEventListener("pointerdown",ev=>{
     if(E.mode!=="room"||ev.target.classList.contains("x"))return;
     ev.preventDefault(); const room=n.parentElement, rb=room.getBoundingClientRect();
-    const ox=ev.clientX-(rb.left+rb.width*mirrorX(ri.x)/100), oy=ev.clientY-(rb.top+rb.height*mirrorY(ri.y)/100);
+    // 重なり回避で表示位置がずれている場合があるので、掴む基準は実際の描画位置から取る
+    const nb=n.getBoundingClientRect();
+    const ox=ev.clientX-nb.left, oy=ev.clientY-nb.top;
     pushUndo("教室備品の移動");
     const mv=e2=>{
       const screenX=Math.max(0,Math.min(100-ri.w,((e2.clientX-ox-rb.left)/rb.width)*100));
       const screenY=Math.max(0,Math.min(100-ri.h,((e2.clientY-oy-rb.top)/rb.height)*100));
       ri.x=mirrorX(screenX); ri.y=mirrorY(screenY);
+      n.__screen={x:screenX,y:screenY};
       n.style.left=screenX+"%"; n.style.top=screenY+"%";
     };
     const up=()=>{
@@ -1475,12 +1484,25 @@ function roomItemEl(ri,c,teacher){
       // 指を離した時点で座席と重なっていたら、いちばん近い外側へ自動で逃がす
       const cur=pushOutOfSeats(mirrorX(ri.x),mirrorY(ri.y),ri.w,ri.h,seatBoundsPct(room));
       ri.x=mirrorX(cur.x); ri.y=mirrorY(cur.y);
+      n.__screen={x:cur.x,y:cur.y};
       n.style.left=cur.x+"%"; n.style.top=cur.y+"%";
       store.save(ctx().t);
     };
     document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);
   });
   return n;
+}
+
+/* 用紙の向きなどで座席の占有範囲が変わっても備品が重ならないよう、
+   レイアウト確定のたびに表示位置だけを最寄りの外側へ逃がす（保存データは書き換えない） */
+function avoidRoomOverlaps(){
+  const room=document.querySelector(".room"); if(!room)return;
+  const sb=seatBoundsPct(room); if(!sb)return;
+  room.querySelectorAll(".ritem").forEach(n=>{
+    const ri=n.__ri, base=n.__screen; if(!ri||!base)return;
+    const p=pushOutOfSeats(base.x,base.y,ri.w,ri.h,sb);
+    n.style.left=p.x+"%"; n.style.top=p.y+"%";
+  });
 }
 
 function seatEl(s,t,c,teacher){
