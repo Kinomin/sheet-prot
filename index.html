@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>自動座席表作成ツール — プロトタイプ</title>
+<title>自動座席表作成ツール（β版）</title>
 <style>
 :root{
   --ink:#161d29; --ink2:#4a5972; --ink3:#7c8aa3;
@@ -400,7 +400,7 @@ table.tbl tr:hover td{background:#f8fafd}
 
   /* 上部バーは幅が足りず重なるので、装飾ラベルを省いてパンくずを優先する */
   .topbar{height:52px;padding:0 12px;gap:9px}
-  .topbar .eyebrow{display:none}
+  .topbar .eyebrow,.beta-chip{display:none}
   .brand{font-size:14px}
   .crumb{font-size:12.5px;overflow-x:auto;white-space:nowrap}
 }
@@ -440,11 +440,14 @@ table.tbl tr:hover td{background:#f8fafd}
 <script>
 "use strict";
 /* =====================================================================
-   自動座席表作成ツール — プロトタイプ (single-file / no build)
+   自動座席表作成ツール（β版） single-file / no build / 依存ライブラリなし
    ---------------------------------------------------------------------
-   本番実装は Next.js(App Router)+TS+Tailwind+dnd-kit+Zustand+IndexedDB。
-   本ファイルは画面遷移・操作性・座席アルゴリズムの検証用モック。
-   store.* をIndexedDBアダプタに差し替えれば永続化に移行できる構造。
+   ブラウザだけで動作し、名簿・座席表データは端末のIndexedDBに保存する。
+   データはアカウント（Googleアカウントのsub）ごとに分離して保存する。
+
+   サーバーが必要になるのは次の2点のみ（いずれも未実装・下記に差し替え地点あり）:
+     - Googleログインの署名検証        … decodeJWT() は表示用に読むだけ
+     - Stripeの購読状態の確認          … AUTH.refreshPlanFromServer()
    ===================================================================== */
 
 /* =====================================================================
@@ -489,7 +492,13 @@ const el = (t,a={},...c)=>{const n=document.createElement(t);
 const $=(s,r=document)=>r.querySelector(s);
 const clone=o=>JSON.parse(JSON.stringify(o));
 const shuffle=a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
-const todayISO=()=>new Date().toISOString().slice(0,10);
+/* 端末のローカル日付を YYYY-MM-DD で返す。
+   toISOString() はUTC基準のため、日本時間の0:00〜9:00では前日の日付になってしまう
+   （座席表の開始日として印刷される値なので、必ずローカル日付で組み立てる）。 */
+const todayISO=()=>{
+  const d=new Date(),p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+};
 const jpDate=iso=>{if(!iso)return"";const[y,m,d]=iso.split("-");return `${+y}年${+m}月${+d}日`};
 const jpDT=ts=>{const d=new Date(ts);const p=n=>String(n).padStart(2,"0");
   return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`};
@@ -556,7 +565,7 @@ function defaultRoom(){
 function newTemplate(o={}){
   const cols=o.cols??6, rows=o.rows??6;
   return {
-    id:uid("tpl"), kind:o.kind||"homeroom",
+    id:uid("tpl"), ownerId:o.ownerId??currentOwnerId(), kind:o.kind||"homeroom",
     className:o.className||"", teacherName:o.teacherName||"",
     subjectName:o.subjectName||"",
     roster:o.roster||[],
@@ -618,7 +627,11 @@ async function idbDelete(id){
 /* ---------------- ストア ----------------
    同期API(get/add/save/remove)は画面描画がすべて同期前提のため維持し、
    永続化はIndexedDBへの書き込みスルー（fire-and-forget）で行う。
-   起動時のload()でIndexedDBから読み込み、空なら見本データを作って書き込む。 */
+
+   ★データはアカウント（Googleアカウントのsub）ごとに分離する★
+   職員室の共用パソコンなど1つのブラウザを複数の先生が使う場面で、
+   別のアカウントでログインした人に生徒名簿が見えてしまうことを防ぐため、
+   テンプレートに ownerId を持たせ、読み込み時に自分のものだけを取り出す。 */
 const store={
   data:{templates:[]},
   all(){return this.data.templates},
@@ -627,12 +640,33 @@ const store={
   add(t){this.data.templates.unshift(t);this.save(t);return t},
   remove(id){this.data.templates=this.data.templates.filter(t=>t.id!==id); idbDelete(id).catch(()=>{})},
   async load(){
-    if(typeof indexedDB==="undefined"){ seed(); return }
+    const owner=currentOwnerId();
+    this.data.templates=[];
+    if(!owner)return;                                   // 未ログイン時は何も読み込まない
+    if(typeof indexedDB==="undefined"){ this.seedFor(owner); return }
     try{
       const all=await idbGetAll();
-      if(all.length) this.data.templates=all.sort((a,b)=>b.createdAt-a.createdAt);
-      else{ seed(); await Promise.all(this.data.templates.map(t=>idbPut(t))) }
-    }catch(err){ seed() }
+      // ownerId導入前に作られたデータは、この端末の利用者のものとして引き継ぐ
+      const legacy=all.filter(t=>!t.ownerId);
+      if(legacy.length){
+        legacy.forEach(t=>{t.ownerId=owner});
+        await Promise.all(legacy.map(t=>idbPut(t)));
+      }
+      const mine=all.filter(t=>t.ownerId===owner);
+      if(mine.length){
+        this.data.templates=mine.sort((a,b)=>b.createdAt-a.createdAt);
+      }else if(!AUTH.account?.seeded){
+        // 初回ログイン時だけ見本データを用意する。
+        // （利用者が自分で全部消したあとに勝手に復活しないよう、アカウント側へ印を残す）
+        this.seedFor(owner);
+        await Promise.all(this.data.templates.map(t=>idbPut(t)));
+      }
+      AUTH.markSeeded();
+    }catch(err){ this.seedFor(owner) }
+  },
+  seedFor(owner){
+    seed();
+    this.data.templates.forEach(t=>{t.ownerId=owner});
   }
 };
 
@@ -679,6 +713,14 @@ function seed(){
 }
 
 /* ---------------- 表示ルール ---------------- */
+/* 座席表は「開始日の新しい順」で扱う。配列は作成順に積まれるため、
+   さかのぼって過去の座席表を作った場合に履歴の並びや「前回」の判定が狂うのを防ぐ。 */
+const chartsByDate = t => [...(t.charts||[])].sort((a,b)=>
+  String(b.startDate||"").localeCompare(String(a.startDate||""))||(b.createdAt-a.createdAt));
+/* その座席表のひとつ前（開始日がより古い直近の座席表）を返す */
+const prevChartOf = (t,c) => chartsByDate(t).filter(x=>
+  x.id!==c.id && String(x.startDate||"")<=String(c.startDate||""))[0]||null;
+
 const titleOf = t => t.kind==="elective" ? (t.subjectName||"（授業名未設定）") : (t.className||"（クラス名未設定）");
 const subOf   = t => t.kind==="elective" ? `担当：${t.teacherName||"—"}` : `担任：${t.teacherName||"—"}`;
 
@@ -742,9 +784,23 @@ const AUTH={
     this.persist();
   },
   signOut(){ this.account=null; this.persist(); },
+  /* 見本データを投入済みかどうかの印。利用者が全テンプレートを削除したあと、
+     再読込で見本が勝手に復活しないようにするために使う。 */
+  markSeeded(){
+    if(!this.account||this.account.seeded)return;
+    this.account.seeded=true; this.persist();
+  },
   /* サーバーを用意したら、ここでStripeの購読状態を問い合わせて上書きする */
   async refreshPlanFromServer(){ return this.account?.plan||null },
 };
+/* データの持ち主を表すID。テンプレートはこの値で分離して保存する */
+function currentOwnerId(){ return AUTH.account?.sub||"" }
+
+/* ログイン・ログアウトのたびに、その人のデータだけを読み直して描画する */
+async function reloadForAccount(){
+  await store.load();
+  render();
+}
 
 /* ---------------- Googleログイン（Google Identity Services） ---------------- */
 let _gisPromise=null;
@@ -862,8 +918,11 @@ function viewLogin(){
   /* ログイン成立後の共通処理。プレミアムを選んでいれば決済へ案内する */
   function afterSignIn(profile){
     AUTH.signIn(profile,"free");        // 決済の確認が取れるまでは無料会員として開始する
-    if(plan==="premium"){ render(); dlgUpgrade({fromLogin:true}); }
-    else { toast("ログインしました"); render(); }
+    // このアカウントのデータだけを読み直す（別の先生のデータが見えないようにする）
+    reloadForAccount().then(()=>{
+      if(plan==="premium")dlgUpgrade({fromLogin:true});
+      else toast("ログインしました");
+    });
   }
 
   if(APP_CONFIG.googleClientId){
@@ -941,8 +1000,14 @@ document.addEventListener("click",()=>closeGear());
 function dlgAccount(){
   const nameIn=el("input",{class:"input",value:AUTH.account?.name||"",placeholder:"例：佐々木 一郎"});
   const planRow=AUTH.isPremium()
-    ? el("div",{class:"note"},el("b",{text:"プレミアム会員です。"}),
-        AUTH.account?.premiumSince?el("span",{text:`（${jpDate(AUTH.account.premiumSince)}から）`}):null)
+    ? el("div",{},
+        el("div",{class:"note"},el("b",{text:"プレミアム会員です。"}),
+          AUTH.account?.premiumSince?el("span",{text:`（${jpDate(AUTH.account.premiumSince)}から）`}):null),
+        // 解約はStripe側の手続きが必要。この画面の表示を変えるだけでは課金は止まらないので明記する
+        el("p",{style:{marginTop:"12px",fontSize:"13px",color:"var(--ink2)",lineHeight:"1.7"}},
+          "解約をご希望の場合は、Stripeから届いた領収書メールのリンク、または",
+          el("button",{class:"link",onclick:()=>{closeModal();dlgContact()}},"問い合わせ"),
+          "からお手続きください。この画面の表示を切り替えるだけでは、自動更新は停止しません。"))
     : el("div",{},
         el("div",{class:"note",style:{marginBottom:"10px"},
           text:`プレミアム会員（${APP_CONFIG.premiumPriceLabel}）に変更すると、今後の追加機能をご利用いただけます。`}),
@@ -954,10 +1019,11 @@ function dlgAccount(){
       el("label",{class:"field"},el("span",{text:"表示名"}),nameIn),
       el("div",{class:"eyebrow",style:{margin:"18px 0 8px"},text:"会員種別"}),
       planRow,
-      AUTH.isPremium()
+      // 決済リンク未設定（＝動作確認中）のときだけ、表示を戻す手段を用意する
+      (AUTH.isPremium()&&!APP_CONFIG.stripePaymentLink)
         ? el("button",{class:"btn btn-sm",style:{marginTop:"12px"},onclick:()=>{
-            AUTH.setPlan("free");closeModal();render();toast("無料会員に戻しました");
-          }},"無料会員に戻す")
+            AUTH.setPlan("free");closeModal();render();toast("表示を無料会員に戻しました（動作確認用）");
+          }},"表示を無料会員に戻す（動作確認用）")
         : null),
     footer:[
       el("button",{class:"btn",onclick:closeModal},"閉じる"),
@@ -1001,25 +1067,27 @@ function dlgContact(){
             el("div",{html:"<code>APP_CONFIG.supportEmail</code> に連絡先を設定してください。"})),
       el("p",{style:{marginTop:"14px",fontSize:"13px",color:"var(--ink2)"},
         text:"不具合のご報告の際は、ご利用の端末（パソコン／タブレット／スマートフォン）とブラウザ名をあわせてお知らせいただけると助かります。"}),
-      APP_CONFIG.corporateContactUrl||true
-        ? el("p",{style:{marginTop:"10px",fontSize:"13.5px"}},
-            APP_CONFIG.corporateContactUrl
-              ? el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約のご相談はこちら")
-              : el("button",{class:"link",onclick:()=>{closeModal();dlgCorporate()}},"法人契約のご相談はこちら"))
-        : null),
+      el("p",{style:{marginTop:"10px",fontSize:"13.5px"}},
+        APP_CONFIG.corporateContactUrl
+          ? el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約のご相談はこちら")
+          : el("button",{class:"link",onclick:()=>{closeModal();dlgCorporate()}},"法人契約のご相談はこちら"))),
     footer:[el("button",{class:"btn btn-primary",onclick:closeModal},"閉じる")]});
 }
 
 function dlgSignOut(){
   modal({title:"ログアウトしますか？",
-    desc:"作成した座席表はこの端末に残ります。",
-    body:el("div",{class:"note",text:"次回また同じGoogleアカウントでログインすると、そのまま続けてご利用いただけます。"}),
+    desc:"作成した座席表はこの端末に保存されたまま残ります。",
+    body:el("div",{},
+      el("div",{class:"note",text:"次回また同じGoogleアカウントでログインすると、そのまま続けてご利用いただけます。ほかのアカウントでログインした人には、あなたの名簿は表示されません。"}),
+      el("p",{style:{marginTop:"12px",fontSize:"12.5px",color:"var(--ink2)"},
+        text:"共用のパソコンで完全にデータを消したい場合は、各テンプレートを削除してからログアウトしてください。"})),
     footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
       el("button",{class:"btn btn-danger",onclick:()=>{
         AUTH.signOut();closeModal();
         if(window.google?.accounts?.id)try{google.accounts.id.disableAutoSelect()}catch(e){}
         R.view="home";R.tplId=null;R.chartId=null;
-        render();toast("ログアウトしました");
+        // 表示中のデータをメモリからも破棄する（次にログインした人に見えないようにする）
+        reloadForAccount().then(()=>toast("ログアウトしました"));
       }},"ログアウト")]});
 }
 
@@ -1096,7 +1164,8 @@ function dlgNewTemplate(){
     title:"新しいテンプレート",
     desc:"あとから基本設定でいつでも変更できます。",
     body:el("div",{},
-      el("label",{class:"field"},el("span",{text:"種別"}),seg),
+      // labelでボタン群を包むと、ラベル文字のクリックが先頭ボタンへ転送され種別が戻ってしまうためdivを使う
+      el("div",{class:"field"},el("span",{text:"種別"}),seg),
       wrapName,
       el("label",{class:"field"},el("span",{text:"担任名"}),f2),
       el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}},
@@ -1160,8 +1229,9 @@ function paneBasic(t){
     el("div",{class:"box"},
       el("h3",{text:"用紙設定"}),
       el("p",{class:"hint",text:"座席サイズ・余白・文字サイズを自動調整し、必ず1ページに収めます。"}),
-      el("label",{class:"field"},el("span",{text:"用紙サイズ"}),paperSeg("paper",[["A4","A4"],["B5","B5"]])),
-      el("label",{class:"field"},el("span",{text:"用紙の向き"}),paperSeg("orient",[["portrait","縦"],["landscape","横"]])),
+      // labelでボタン群を包むと、ラベル文字のクリックが先頭ボタンへ転送され設定が勝手に変わるためdivを使う
+      el("div",{class:"field"},el("span",{text:"用紙サイズ"}),paperSeg("paper",[["A4","A4"],["B5","B5"]])),
+      el("div",{class:"field"},el("span",{text:"用紙の向き"}),paperSeg("orient",[["portrait","縦"],["landscape","横"]])),
       el("div",{style:{marginTop:"14px"}}, previewSheet(t))),
     el("div",{class:"box",style:{gridColumn:"1 / -1",borderColor:"#e8c4bc"}},
       el("h3",{style:{color:"var(--vermilion)"},text:"テンプレートの削除"}),
@@ -1209,7 +1279,11 @@ function paneRoster(t){
           onchange:e=>{s.romaji=e.target.value.trim();store.save(t)}})),
       el("td",{},el("span",{class:"chip "+(s.gender==="m"?"chip-i":"chip-v"),text:s.gender==="m"?"男":"女"})),
       el("td",{style:{textAlign:"right"}},el("button",{class:"btn btn-sm btn-danger",
-        onclick:()=>{t.roster=t.roster.filter(x=>x!==s);store.save(t);draw();}},"削除")))));
+        onclick:()=>{
+          t.roster=t.roster.filter(x=>x!==s);
+          purgeMissingStudents(t);   // その生徒の配置・固定席・NGペアも一緒に取り除く
+          store.save(t);draw();
+        }},"削除")))));
     if(!t.roster.length)tbody.append(el("tr",{},el("td",{colspan:"6",
       style:{padding:"36px",textAlign:"center",color:"var(--ink3)"},
       text:"名簿がまだありません。CSVを読み込むか、1名ずつ追加してください。"})));
@@ -1369,7 +1443,57 @@ function applyRosterRows(rows,t,draw){
       gender:/女|f/i.test(String(r[iGd]??""))?"f":"m"});
   });
   if(!out.length)return dlgError("名簿を読み込めませんでした",["データ行がありません"]);
-  t.roster=out;store.save(t);draw();toast(`${out.length}名を読み込みました`);
+
+  // 名簿を入れ替えると、既存の座席表の配置や固定席・NGペアが「存在しない生徒番号」を
+  // 指したままになる。黙って壊さず、影響を数えて確認をとってから掃除する。
+  const impact=rosterSwapImpact(t,out);
+  if(impact.total===0){ commit(); return }
+  modal({title:"名簿を入れ替えますか？",
+    desc:`${t.roster.length}名 → ${out.length}名 に置き換えます。`,
+    body:el("div",{},
+      el("div",{class:"alert"},
+        el("h4",{text:"影響する設定があります"}),
+        el("ul",{style:{margin:"6px 0 0 17px",lineHeight:"1.7"}},
+          impact.seats?el("li",{text:`既存の座席表の配置 ${impact.seats}席分が空席に戻ります`}):null,
+          impact.fixed?el("li",{text:`固定席 ${impact.fixed}件が解除されます`}):null,
+          impact.ng?el("li",{text:`NGペア ${impact.ng}件が解除されます`}):null)),
+      el("p",{style:{marginTop:"12px",fontSize:"13px",color:"var(--ink2)"},
+        text:"新しい名簿にも同じ出席番号の生徒がいる場合、その席はそのまま残ります。"})),
+    footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
+      el("button",{class:"btn btn-primary",onclick:()=>{closeModal();commit()}},"入れ替える")]});
+
+  function commit(){
+    t.roster=out;
+    purgeMissingStudents(t);
+    store.save(t);draw();toast(`${out.length}名を読み込みました`);
+  }
+}
+
+/* 名簿を newRoster に入れ替えたときに失われる設定の件数を数える。
+   固定席・NGペアは画面に見えているテンプレート側の件数で伝える
+   （座席表ごとのスナップショットまで足すと、利用者の見た目より多い数字になってしまう）。 */
+function rosterSwapImpact(t,newRoster){
+  const has=no=>newRoster.some(r=>r.no===no);
+  const seats=(t.charts||[]).reduce((n,c)=>
+    n+Object.values(c.assign||{}).filter(no=>!has(no)).length,0);
+  const fixed=(t.fixedSeats||[]).filter(f=>!has(f.no)).length;
+  const ng=(t.ngPairs||[]).filter(p=>p.some(no=>!has(no))).length;
+  return {seats,fixed,ng,total:seats+fixed+ng};
+}
+
+/* 名簿に存在しない生徒番号への参照を、テンプレート・全座席表から取り除く。
+   放置すると「配置35席」と表示されるのに実際は誰も表示されない状態になる。 */
+function purgeMissingStudents(t){
+  const has=no=>t.roster.some(r=>r.no===no);
+  const cleanSeats=arr=>(arr||[]).filter(f=>has(f.no));
+  const cleanPairs=arr=>(arr||[]).filter(p=>p.every(no=>has(no)));
+  t.fixedSeats=cleanSeats(t.fixedSeats);
+  t.ngPairs=cleanPairs(t.ngPairs);
+  (t.charts||[]).forEach(c=>{
+    Object.entries(c.assign||{}).forEach(([sid,no])=>{ if(!has(no))delete c.assign[sid] });
+    c.fixedSeats=cleanSeats(c.fixedSeats);
+    c.ngPairs=cleanPairs(c.ngPairs);
+  });
 }
 async function importRoster(file,t,draw){
   if(!file)return;
@@ -1591,7 +1715,7 @@ function paneRules(t){
 
 /* --- 座席表履歴 --- */
 function paneHistory(t){
-  const rows=t.charts.length? t.charts.map(c=>{
+  const rows=t.charts.length? chartsByDate(t).map(c=>{
     const placed=Object.keys(c.assign).length;
     return el("div",{class:"hrow"},
       el("div",{class:"hrow-info"},
@@ -1633,9 +1757,10 @@ function dlgNewChart(t){
   const sd=el("input",{class:"input",type:"date",value:todayISO()});
   const ed=el("input",{class:"input",type:"date"});
   const nm=el("input",{class:"input",placeholder:"例：1学期後半"});
-  const copyPrev=t.charts.length? el("label",{class:"check"},
+  const latest=chartsByDate(t)[0]||null;   // 開始日がいちばん新しい座席表
+  const copyPrev=latest? el("label",{class:"check"},
     el("input",{type:"checkbox"}),el("div",{},el("b",{text:"直前の座席表の配置を引き継ぐ"}),
-      el("small",{text:jpDate(t.charts[0].startDate)+"〜 の配置をコピーして始めます"}))) : null;
+      el("small",{text:jpDate(latest.startDate)+"〜 の配置をコピーして始めます"}))) : null;
   modal({title:"新しい座席表を作成",desc:"開始日は印刷時に右上へ表示されます。",
     body:el("div",{},
       el("label",{class:"field"},el("span",{text:"開始日（必須）"}),sd),
@@ -1646,10 +1771,10 @@ function dlgNewChart(t){
     footer:[el("button",{class:"btn",onclick:closeModal},"キャンセル"),
       el("button",{class:"btn btn-primary",onclick:()=>{
         if(!sd.value)return toast("開始日を入力してください");
+        if(ed.value&&ed.value<sd.value)return toast("終了日は開始日より後の日付にしてください");
         const c=newChart(t,sd.value);c.endDate=ed.value;c.name=nm.value.trim();
-        if(copyPrev&&copyPrev.querySelector("input").checked){
-          const prev=t.charts[0];
-          Object.entries(prev.assign).forEach(([sid,no])=>{
+        if(copyPrev&&copyPrev.querySelector("input").checked&&latest){
+          Object.entries(latest.assign).forEach(([sid,no])=>{
             if(c.layout.seats.some(s=>s.id===sid&&s.enabled))c.assign[sid]=no;});
         }
         t.charts.unshift(c);store.save(t);closeModal();go({view:"edit",chartId:c.id});
@@ -1667,17 +1792,24 @@ function ctx(){
   const c=t.charts.find(x=>x.id===R.chartId); if(!c)return null;
   return {t,c};
 }
+/* 固定席は座席表(c.fixedSeats)とテンプレート(t.fixedSeats)の両方に書き込むため、
+   undo/redoでも必ず両方を巻き戻す。片方だけ戻すと座席ピッカーとの表示が食い違う。 */
+function snapNow(){
+  const k=ctx();
+  return{assign:clone(k.c.assign),room:clone(k.c.room),
+         fixed:clone(k.c.fixedSeats),tplFixed:clone(k.t.fixedSeats)};
+}
 function pushUndo(label){
   const k=ctx(); if(!k)return;
-  E.undo.push({assign:clone(k.c.assign),room:clone(k.c.room),
-               fixed:clone(k.c.fixedSeats),label});
+  E.undo.push({...snapNow(),label});
   if(E.undo.length>MAXHIST)E.undo.shift();
   E.redo.length=0;
 }
 function applySnap(s){
-  const k=ctx(); k.c.assign=clone(s.assign);k.c.room=clone(s.room);k.c.fixedSeats=clone(s.fixed);
+  const k=ctx();
+  k.c.assign=clone(s.assign);k.c.room=clone(s.room);k.c.fixedSeats=clone(s.fixed);
+  if(s.tplFixed)k.t.fixedSeats=clone(s.tplFixed);
 }
-function snapNow(){const k=ctx();return{assign:clone(k.c.assign),room:clone(k.c.room),fixed:clone(k.c.fixedSeats)}}
 function doUndo(){
   if(!E.undo.length)return toast("これ以上戻せません");
   const cur=snapNow();const s=E.undo.pop();E.redo.push(cur);applySnap(s);
@@ -2070,8 +2202,8 @@ function dlgRandom(t,c){
   const fixed=(c.fixedSeats||[]).filter(f=>t.roster.some(s=>s.no===f.no));
   const nameOf=no=>t.roster.find(s=>s.no===no)?.name??`#${no}`;
   const seatLabel=id=>{const s=c.layout.seats.find(x=>x.id===id);return s?`前から${s.row+1}列目・${s.col+1}番`:"—"};
-  const idx=t.charts.findIndex(x=>x.id===c.id);
-  const prev=t.charts[idx+1]||null;
+  // 「前回」は配列の並び順ではなく開始日で判定する（過去分をあとから作っても正しく効くように）
+  const prev=prevChartOf(t,c);
 
   const cbGender=el("input",{type:"checkbox"});
   const cbPrev=el("input",{type:"checkbox",checked:!!prev,disabled:!prev});
@@ -2331,6 +2463,7 @@ function render(){
       el("div",{class:"brand"},el("span",{class:"mark"}),"自動座席表作成ツール"),
       el("div",{class:"div",style:{width:"1px",height:"24px",background:"var(--line)"}}),
       crumb, el("div",{class:"spacer"}),
+      el("span",{class:"chip chip-g beta-chip",text:"β版"}),
       AUTH.isPremium()?el("span",{class:"chip chip-a",text:"プレミアム"}):null,
       gearButton()),
     el("div",{class:"view",id:"view"}));
