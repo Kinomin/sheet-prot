@@ -35,7 +35,9 @@
 3. **Authentication → URL Configuration**
    - Site URL： `https://kinomin.github.io/sheet-prot/`
    - Redirect URLs にも同じURLを追加
-4. **SQL Editor** で [`supabase/migrations/0001_profiles.sql`](./supabase/migrations/0001_profiles.sql) の内容を実行
+4. **SQL Editor** で以下を順に実行
+   1. [`supabase/migrations/0001_profiles.sql`](./supabase/migrations/0001_profiles.sql)（会員情報）
+   2. [`supabase/migrations/0002_limits.sql`](./supabase/migrations/0002_limits.sql)（印刷回数の制限）
 5. **Project Settings → API** から `Project URL` と `anon public` キーを控える
 
 ## 3. Stripe（決済）
@@ -49,7 +51,33 @@
    - 「サブスクリプションのキャンセルを許可」をオンにする
 3. Webhookは手順4のあとで設定します
 
-## 4. Edge Functions のデプロイ
+## 4. 問い合わせの設定（スプレッドシート記録＋Gmail通知）
+
+問い合わせ内容をGoogleスプレッドシートへ記録し、あわせてGmailで通知します。
+
+1. Googleドライブで**スプレッドシートを新規作成**し、URLの `/d/` と `/edit` の間にある**ID**を控える
+   （シートは自動で作られるので、中身は空のままで構いません）
+2. [script.google.com](https://script.google.com/) で**新しいプロジェクト**を作成
+3. [`google-apps-script/問い合わせ受付.gs`](./google-apps-script/問い合わせ受付.gs) の内容を貼り付け
+4. **プロジェクトの設定 → スクリプト プロパティ**に以下を追加
+
+   | プロパティ | 値 |
+   |---|---|
+   | `SHEET_ID` | 1で控えたスプレッドシートのID |
+   | `NOTIFY_TO` | 通知を受け取るメールアドレス |
+   | `SHARED_SECRET` | 推測されない文字列（例：`openssl rand -hex 24` の出力） |
+
+5. エディタで `testSend` を実行し、**権限を承認**する
+   （スプレッドシートに1行追加され、通知メールが届けば成功です）
+6. **デプロイ → 新しいデプロイ → 種類：ウェブアプリ**
+   - 次のユーザーとして実行：**自分**
+   - アクセスできるユーザー：**全員**（呼び出しはSupabase側からのみ行い、合言葉で保護します）
+   - 発行された**ウェブアプリのURL**を控える
+
+> Gmailの送信は、このスクリプトを所有するGoogleアカウントから行われます。
+> 個人のGmailの送信上限は1日あたり100通程度です（Workspaceは1500通程度）。
+
+## 5. Edge Functions のデプロイ
 
 ```bash
 npm install -g supabase
@@ -60,7 +88,13 @@ supabase link --project-ref <プロジェクトID>
 シークレットを登録します（**ここだけがシークレットの置き場所です**）。
 
 ```bash
-supabase secrets set STRIPE_SECRET_KEY=sk_live_xxx STRIPE_PRICE_ID=price_xxx SITE_URL=https://kinomin.github.io/sheet-prot ALLOWED_ORIGINS=https://kinomin.github.io
+supabase secrets set \
+  STRIPE_SECRET_KEY=sk_live_xxx \
+  STRIPE_PRICE_ID=price_xxx \
+  SITE_URL=https://kinomin.github.io/sheet-prot \
+  ALLOWED_ORIGINS=https://kinomin.github.io \
+  INQUIRY_WEBHOOK_URL=<手順4で控えたGASのURL> \
+  INQUIRY_SHARED_SECRET=<手順4で決めた合言葉>
 ```
 
 関数をデプロイします。
@@ -73,13 +107,17 @@ supabase functions deploy create-checkout-session
 supabase functions deploy create-portal-session
 ```
 
+```bash
+supabase functions deploy send-inquiry
+```
+
 Webhookはログインを経由しないため、JWT検証を外してデプロイします。
 
 ```bash
 supabase functions deploy stripe-webhook --no-verify-jwt
 ```
 
-## 5. Stripe Webhook の登録
+## 6. Stripe Webhook の登録
 
 1. Stripe → **開発者 → Webhook → エンドポイントを追加**
 2. URL： `https://<プロジェクトID>.supabase.co/functions/v1/stripe-webhook`
@@ -95,7 +133,7 @@ supabase functions deploy stripe-webhook --no-verify-jwt
 supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_xxx
 ```
 
-## 6. アプリ側の設定
+## 7. アプリ側の設定
 
 `index.html` 冒頭の `APP_CONFIG` を編集します（**すべて公開してよい値です**）。
 
@@ -118,7 +156,7 @@ const APP_CONFIG={
 git add -A && git commit -m "本番設定を反映" && git push
 ```
 
-## 7. 公開前の確認
+## 8. 公開前の確認
 
 Stripeを**テストモード**にして、以下を通しで確認してください。
 
@@ -131,11 +169,16 @@ Stripeを**テストモード**にして、以下を通しで確認してくだ�
 - [ ] 解約すると期限日以降に `plan` が `free` に戻る
 - [ ] 別のGoogleアカウントでログインした際、他人の名簿が表示されない
 - [ ] スマートフォンで座席表の作成・印刷ができる
+- [ ] **無料会員**で印刷を4回試し、4回目に「印刷回数を使い切りました」が出る
+- [ ] 無料会員では設定メニューに「今すぐ同期」が出ず、端末間で引き継がれない
+- [ ] プレミアム会員になると印刷が無制限になり、端末間の引き継ぎが有効になる
+- [ ] 問い合わせを送信すると、スプレッドシートに行が追加されGmailに通知が届く
+- [ ] 続けて問い合わせを送ると、60秒間は送信できない旨が表示される
 
 確認できたらStripeを**本番モード**に切り替え、本番のキー（`sk_live_...`／`price_...`／`whsec_...`）で
-手順4・5のシークレットを登録し直します。
+手順5・6のシークレットを登録し直します。
 
-## 8. 運用について
+## 9. 運用について
 
 - **有効期限切れの保険**：webhookが届かなかった場合に備え、`expire_lapsed_premium()` を1日1回実行することを推奨します
   （Supabase → Database → Cron から `select public.expire_lapsed_premium();` を登録）

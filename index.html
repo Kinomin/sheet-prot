@@ -861,7 +861,15 @@ const SB={
        body:JSON.stringify({display_name:name})});
     return res.ok;
   },
-  /* Edge Function の呼び出し（決済・解約） */
+  /* データベース側の関数を呼ぶ（印刷回数の消費など） */
+  async rpc(name,args={}){
+    if(!await this.ensureFresh())throw new Error("ログインが必要です");
+    const res=await fetch(`${APP_CONFIG.supabaseUrl}/rest/v1/rpc/${name}`,{
+      method:"POST",headers:this.headers(),body:JSON.stringify(args)});
+    if(!res.ok)throw new Error(`処理できませんでした (${res.status})`);
+    return res.json();
+  },
+  /* Edge Function の呼び出し（決済・解約・問い合わせ） */
   async callFunction(name,body={}){
     if(!await this.ensureFresh())throw new Error("ログインが必要です");
     const res=await fetch(`${APP_CONFIG.supabaseUrl}/functions/v1/${name}`,{
@@ -920,6 +928,7 @@ const AUTH={
       plan:profile?.plan==="premium"?"premium":"free",
       periodEnd:profile?.current_period_end||"",
       cancelAtPeriodEnd:!!profile?.cancel_at_period_end,
+      printCount:Number(profile?.print_count||0),
       trial:false,
       seeded:this.account?.seeded&&this.account?.sub===user.id?true:this.account?.seeded,
       updatedAt:Date.now(),
@@ -1107,8 +1116,12 @@ function mergeTemplates(local,remote,tomb){
 const SYNC={
   state:"off",          // off | idle | syncing | ok | error
   lastAt:0, lastError:"", timer:null,
-  available(){ return CLOUD.configured()&&AUTH.signedIn()&&!AUTH.account?.trial },
+  /* 端末間の引き継ぎはプレミアム会員の機能 */
+  available(){
+    return CLOUD.configured()&&AUTH.signedIn()&&!AUTH.account?.trial&&AUTH.isPremium();
+  },
   label(){
+    if(AUTH.signedIn()&&!AUTH.isPremium())return "この端末のみに保存（無料会員）";
     if(!this.available())return "この端末のみに保存";
     if(this.state==="syncing")return "同期中…";
     if(this.state==="error")return "同期できませんでした";
@@ -1258,9 +1271,9 @@ function viewLogin(){
     return card;
   };
   const freeCard=planCard("free","無料会員","0円",
-    ["Googleアカウントを選ぶだけ","座席表の作成・印刷","同じアカウントなら端末をまたいで利用"]);
+    ["座席表の作成・編集は無制限","印刷は3回まで","保存はこの端末のみ"]);
   const premCard=planCard("premium","プレミアム会員",APP_CONFIG.premiumPriceLabel,
-    ["無料会員のすべての機能","今後の追加機能を利用可能","開発の継続を応援できます"]);
+    ["印刷は無制限","端末をまたいでデータを引き継ぎ","今後の追加機能を利用可能"]);
 
   function syncPlan(){
     LOGIN_INTENT=plan;
@@ -1350,7 +1363,9 @@ function gearButton(){
             closeGear(); render();
             toast(ok?"同期しました":("同期できませんでした："+SYNC.lastError));
           }},"今すぐ同期")
-        : null,
+        : (SB_READY()&&!AUTH.account?.trial&&!AUTH.isPremium()
+            ? el("button",{class:"gear-item",onclick:()=>{closeGear();dlgUpgrade({})}},"端末間の引き継ぎを使う")
+            : null),
       el("button",{class:"gear-item",onclick:()=>{closeGear();dlgAccount()}},"アカウント設定"),
       el("button",{class:"gear-item",onclick:()=>{closeGear();dlgContact()}},"問い合わせ"),
       el("button",{class:"gear-item danger",onclick:()=>{closeGear();dlgSignOut()}},"ログアウト"));
@@ -1379,8 +1394,12 @@ function dlgAccount(){
             toast(String(err&&err.message||err)) }
         }},"お支払い・解約の管理"))
     : el("div",{},
-        el("div",{class:"note",style:{marginBottom:"10px"},
-          text:`プレミアム会員（${APP_CONFIG.premiumPriceLabel}）に変更すると、今後の追加機能をご利用いただけます。`}),
+        el("div",{class:"note",style:{marginBottom:"10px"}},
+          el("b",{text:"無料会員でご利用中です"}),
+          el("div",{style:{marginTop:"6px",fontSize:"13px"},
+            text:`印刷はあと${Math.max(0,PRINT_LIMIT_FREE-(AUTH.account?.printCount??0))}回、データの保存はこの端末のみです。`}),
+          el("div",{style:{marginTop:"8px",fontSize:"13px"},
+            text:`プレミアム会員（${APP_CONFIG.premiumPriceLabel}）にすると、印刷が無制限になり、端末をまたいでデータを引き継げます。`})),
         el("button",{class:"btn btn-primary",onclick:()=>{closeModal();dlgUpgrade({})}},"プレミアム会員に変更する"));
 
   modal({title:"アカウント設定",
@@ -1400,7 +1419,11 @@ function dlgUpgrade({fromLogin}){
   const body=el("div",{},
     el("div",{class:"note"},
       el("b",{text:`プレミアム会員：${APP_CONFIG.premiumPriceLabel}`}),
-      el("div",{style:{marginTop:"5px"},text:"お支払いはStripeの決済ページで行われます。カード情報がこのツールに渡ることはありません。"})),
+      el("ul",{style:{margin:"8px 0 0 17px",lineHeight:"1.8",fontSize:"13.5px"}},
+        el("li",{text:"印刷が無制限になります（無料会員は3回まで）"}),
+        el("li",{text:"同じGoogleアカウントで端末をまたいでデータを引き継げます"}),
+        el("li",{text:"今後追加される機能をご利用いただけます"})),
+      el("div",{style:{marginTop:"8px",fontSize:"13px"},text:"お支払いはStripeの決済ページで行われます。カード情報がこのツールに渡ることはありません。"})),
     fromLogin?el("p",{style:{marginTop:"12px",fontSize:"13.5px",color:"var(--ink2)"},
       text:"いまは無料会員としてご利用いただけます。お支払いが完了するとプレミアム会員に切り替わります。"}):null,
     el("p",{style:{marginTop:"12px",fontSize:"12.5px",color:"var(--ink3)",lineHeight:"1.7"}},
@@ -1426,7 +1449,57 @@ function dlgUpgrade({fromLogin}){
   modal({title:"プレミアム会員へのお申し込み",body,footer});
 }
 
+const INQUIRY_CATEGORIES=["不具合の報告","使い方の質問","機能のご要望","お支払いについて","法人契約について","その他"];
+
 function dlgContact(){
+  // 送信できない状態（お試しモード等）では、従来どおりメールでの連絡先を案内する
+  if(!SB_READY()||AUTH.account?.trial)return dlgContactFallback();
+
+  const cat=el("select",{class:"input"},...INQUIRY_CATEGORIES.map(c=>el("option",{value:c},c)));
+  const nameIn=el("input",{class:"input",value:AUTH.account?.name||"",placeholder:"例：佐々木 一郎"});
+  const mailIn=el("input",{class:"input",type:"email",value:AUTH.account?.email||"",placeholder:"返信先のメールアドレス"});
+  const msgIn=el("textarea",{class:"input",rows:"6",style:{padding:"10px 12px",resize:"vertical",lineHeight:"1.7"},
+    placeholder:"できるだけ具体的にお書きください。不具合の場合は、どの画面で何をしたときに起きたかを教えていただけると助かります。"});
+  const counter=el("div",{style:{fontSize:"11.5px",color:"var(--ink3)",textAlign:"right",marginTop:"4px"},text:"0 / 4000"});
+  msgIn.addEventListener("input",()=>{counter.textContent=`${msgIn.value.length} / 4000`});
+
+  const send=el("button",{class:"btn btn-primary",onclick:async()=>{
+    const message=msgIn.value.trim();
+    if(!message){ msgIn.focus(); return toast("内容を入力してください") }
+    if(message.length>4000)return toast("内容は4000文字以内で入力してください");
+    send.disabled=true; send.textContent="送信中…";
+    try{
+      await SB.callFunction("send-inquiry",{
+        category:cat.value, name:nameIn.value.trim(),
+        email:mailIn.value.trim(), message,
+      });
+      closeModal();
+      toast("送信しました。ありがとうございます");
+    }catch(err){
+      send.disabled=false; send.textContent="送信する";
+      toast(String(err&&err.message||err));
+    }
+  }},"送信する");
+
+  modal({title:"問い合わせ",
+    desc:"ご質問・不具合のご報告・機能のご要望をお寄せください。",
+    body:el("div",{},
+      el("label",{class:"field"},el("span",{text:"種別"}),cat),
+      el("label",{class:"field"},el("span",{text:"お名前"}),nameIn),
+      el("label",{class:"field"},el("span",{text:"メールアドレス（返信先）"}),mailIn),
+      el("label",{class:"field",style:{marginBottom:"4px"}},el("span",{text:"内容"}),msgIn),
+      counter,
+      el("p",{style:{marginTop:"10px",fontSize:"12px",color:"var(--ink3)",lineHeight:"1.7"},
+        text:"ご利用のブラウザ情報が一緒に送信されます。生徒の名簿の内容が送信されることはありません。"}),
+      el("p",{style:{marginTop:"10px",fontSize:"13.5px"}},
+        APP_CONFIG.corporateContactUrl
+          ? el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約のご相談はこちら")
+          : el("button",{class:"link",onclick:()=>{closeModal();dlgCorporate()}},"法人契約のご相談はこちら"))),
+    footer:[el("button",{class:"btn",onclick:closeModal},"閉じる"),send]});
+}
+
+/* 送信のしくみが使えない場合の案内 */
+function dlgContactFallback(){
   const mail=APP_CONFIG.supportEmail;
   modal({title:"問い合わせ",
     desc:"ご質問・不具合のご報告・機能のご要望をお寄せください。",
@@ -1437,11 +1510,7 @@ function dlgContact(){
         : el("div",{class:"alert"},el("h4",{text:"問い合わせ先が未設定です"}),
             el("div",{html:"<code>APP_CONFIG.supportEmail</code> に連絡先を設定してください。"})),
       el("p",{style:{marginTop:"14px",fontSize:"13px",color:"var(--ink2)"},
-        text:"不具合のご報告の際は、ご利用の端末（パソコン／タブレット／スマートフォン）とブラウザ名をあわせてお知らせいただけると助かります。"}),
-      el("p",{style:{marginTop:"10px",fontSize:"13.5px"}},
-        APP_CONFIG.corporateContactUrl
-          ? el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約のご相談はこちら")
-          : el("button",{class:"link",onclick:()=>{closeModal();dlgCorporate()}},"法人契約のご相談はこちら"))),
+        text:"不具合のご報告の際は、ご利用の端末（パソコン／タブレット／スマートフォン）とブラウザ名をあわせてお知らせいただけると助かります。"})),
     footer:[el("button",{class:"btn btn-primary",onclick:closeModal},"閉じる")]});
 }
 
@@ -2746,9 +2815,11 @@ function dlgPrintPreview(){
   const facingLabel=t.print.facing==="teacher"?"教員側":"生徒側";
   const titleBar=el("div",{style:{color:"#fff",fontWeight:"700",fontSize:"15px",textAlign:"center"}},
     `印刷プレビュー　${t.print.paper}・${t.print.orient==="portrait"?"縦":"横"}・${facingLabel}`);
-  const footer=el("div",{style:{display:"flex",gap:"10px"}},
+  const okBtn=el("button",{class:"btn btn-primary btn-lg",onclick:()=>confirmPrint(okBtn)},"はい、印刷する");
+  const footer=el("div",{style:{display:"flex",gap:"10px",alignItems:"center",flexWrap:"wrap",justifyContent:"center"}},
     el("button",{class:"btn btn-lg",onclick:()=>cancel()},"キャンセル"),
-    el("button",{class:"btn btn-primary btn-lg",onclick:()=>confirmPrint()},"はい、印刷する"));
+    okBtn,
+    printQuotaNote());
   const panel=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:"16px"}},
     titleBar,previewBox,footer);
   const backdrop=el("div",{style:{
@@ -2784,10 +2855,72 @@ function dlgPrintPreview(){
     FIT.print=false;
     requestAnimationFrame(fitSheet);
   }
-  function confirmPrint(){
+  async function confirmPrint(btn){
+    btn.disabled=true;
+    const gate=await consumePrint();     // 無料会員は回数を消費する
+    if(!gate.allowed){
+      teardown(); FIT.print=false; requestAnimationFrame(fitSheet);
+      dlgPrintLimit(gate);
+      return;
+    }
     teardown();
     doPrint();
+    if(!gate.unlimited&&typeof gate.remaining==="number"){
+      setTimeout(()=>toast(gate.remaining>0
+        ? `無料会員の印刷はあと${gate.remaining}回です`
+        : "無料会員の印刷回数を使い切りました"),400);
+    }
   }
+}
+
+/* =====================================================================
+   印刷回数（無料会員の上限）
+   ---------------------------------------------------------------------
+   回数の管理はサーバー側（consume_print）で行う。ブラウザに持たせると
+   消すだけで回避できてしまうため。
+   ※Webページである以上、ブラウザ自体の印刷機能を技術的に塞ぐことはできません。
+     ここでの制限は、ツールの印刷ボタン経由の回数に対するものです。
+   ===================================================================== */
+const PRINT_LIMIT_FREE=3;
+
+async function consumePrint(){
+  // 未設定（お試しモード）では制限しない
+  if(!SB_READY()||AUTH.account?.trial)return {allowed:true,unlimited:true};
+  if(AUTH.isPremium())return {allowed:true,unlimited:true};
+  try{
+    const r=await SB.rpc("consume_print");
+    // 画面表示用の残り回数を合わせる
+    if(r&&typeof r.used==="number"&&AUTH.account){
+      AUTH.account.printCount=r.used; AUTH.persist();
+    }
+    return r;
+  }catch(e){
+    // 通信できないときは印刷を妨げない（授業の準備を止めないことを優先）
+    return {allowed:true,unlimited:false,offline:true};
+  }
+}
+/* 残り回数の案内（プレビュー内に表示） */
+function printQuotaNote(){
+  if(!SB_READY()||AUTH.account?.trial||AUTH.isPremium())return null;
+  const used=AUTH.account?.printCount??0;
+  const left=Math.max(0,PRINT_LIMIT_FREE-used);
+  return el("div",{style:{color:"#e4e8f0",fontSize:"12.5px",width:"100%",textAlign:"center"},
+    text:`無料会員の印刷はあと${left}回です（プレミアム会員は無制限）`});
+}
+function dlgPrintLimit(gate){
+  modal({title:"無料会員の印刷回数を使い切りました",
+    desc:`無料会員でご利用いただける印刷は${gate.limit??PRINT_LIMIT_FREE}回までです。`,
+    body:el("div",{},
+      el("div",{class:"note"},
+        el("b",{text:`プレミアム会員（${APP_CONFIG.premiumPriceLabel}）`}),
+        el("ul",{style:{margin:"8px 0 0 17px",lineHeight:"1.8"}},
+          el("li",{text:"印刷は無制限"}),
+          el("li",{text:"同じGoogleアカウントで端末をまたいでデータを引き継ぎ"}),
+          el("li",{text:"今後追加される機能"}))),
+      el("p",{style:{marginTop:"12px",fontSize:"12.5px",color:"var(--ink2)"},
+        text:"作成済みの座席表は、無料会員のままでも引き続き閲覧・編集できます。"})),
+    footer:[el("button",{class:"btn",onclick:closeModal},"閉じる"),
+      el("button",{class:"btn btn-primary",onclick:()=>{closeModal();dlgUpgrade({})}},"プレミアム会員に変更する")]});
 }
 
 function doPrint(){
