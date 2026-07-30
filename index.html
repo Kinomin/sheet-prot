@@ -295,7 +295,18 @@ table.tbl tr:hover td{background:#f8fafd}
 .gbtn-slot{display:flex;flex-direction:column;align-items:center;gap:10px;min-height:44px}
 .login-hint{font-size:11.5px;color:var(--ink3);line-height:1.55;text-align:center}
 .login-hint code,.alert code,.note code{font-family:var(--mono);font-size:.92em;background:#eef1f6;padding:1px 4px;border-radius:3px}
+.login-legal{margin-top:14px;font-size:11.5px;color:var(--ink3);text-align:center;line-height:1.7}
+.login-legal .link{font-size:11.5px}
 .login-foot{margin-top:20px;padding-top:16px;border-top:1px solid var(--line2);text-align:center}
+/* Googleログインボタン（公式ガイドラインに沿った白背景＋Gマーク） */
+.gbtn{
+  display:flex;align-items:center;justify-content:center;gap:11px;width:100%;
+  min-height:48px;padding:0 18px;border:1.5px solid #dadce0;border-radius:99px;
+  background:#fff;color:#3c4043;font-size:15px;font-weight:700;transition:.12s;
+}
+.gbtn:hover:not(:disabled){background:#f8f9fa;border-color:#c9ced6;box-shadow:0 1px 3px rgba(60,64,67,.2)}
+.gbtn:disabled{opacity:.6;cursor:not-allowed}
+.gbtn-ic{display:flex;align-items:center;flex:0 0 auto}
 .link{
   background:none;border:none;padding:0;font-size:13.5px;font-weight:600;
   color:var(--indigo);text-decoration:underline;text-underline-offset:2px;cursor:pointer;
@@ -318,6 +329,7 @@ table.tbl tr:hover td{background:#f8fafd}
 .gear-who{padding:13px 15px 11px;border-bottom:1px solid var(--line2)}
 .gear-name{font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gear-plan{margin-top:6px}
+.gear-sync{margin-top:7px;font-size:11.5px;color:var(--ink3);font-family:var(--mono)}
 .gear-item{
   display:block;width:100%;text-align:left;padding:11px 15px;font-size:13.5px;font-weight:600;
   color:var(--ink);border-bottom:1px solid var(--line2);
@@ -458,14 +470,18 @@ table.tbl tr:hover td{background:#f8fafd}
    ブラウザに置いた値は誰でも読めるため、決済の改ざんにつながります。
    ===================================================================== */
 const APP_CONFIG={
-  // Google Cloud Console →「APIとサービス」→「認証情報」→ OAuth 2.0 クライアントID（ウェブ）
-  // 承認済みJavaScript生成元に https://kinomin.github.io を登録してください。
-  // 公開前提の値なのでコミットして構いません。空のままでも「お試しログイン」で動作します。
-  googleClientId:"",
+  // Supabase → Project Settings → API
+  // URL と anon キーはブラウザに置く前提の公開値なので、コミットして問題ありません
+  // （データは行レベルセキュリティ(RLS)で守ります）。
+  supabaseUrl:"",
+  supabaseAnonKey:"",
 
-  // Stripeダッシュボード →「商品」→ 500円/年の商品を作成 →「Payment Link」を発行して貼り付け。
-  // Payment LinkのURLは公開前提なので安全です。
-  stripePaymentLink:"",
+  // Google Cloud Console →「APIとサービス」→「認証情報」→ OAuth 2.0 クライアントID（ウェブ）
+  // ・Supabaseの Authentication → Providers → Google に設定するものと同じIDを入れる
+  //   （同じIDにすることで、ドライブ利用の同意を1回で済ませられます）
+  // ・「ライブラリ」で Google Drive API を有効化
+  // ・OAuth同意画面のスコープに .../auth/drive.appdata を追加
+  googleClientId:"",
 
   // 法人契約の問い合わせ先（お問い合わせフォームのURLなど）
   corporateContactUrl:"",
@@ -474,7 +490,14 @@ const APP_CONFIG={
   supportEmail:"",
 
   premiumPriceLabel:"500円 / 年",
+
+  // 利用規約・プライバシーポリシーの掲載先（同じリポジトリ内のページでも可）
+  termsUrl:"./terms.html",
+  privacyUrl:"./privacy.html",
 };
+
+/* Supabaseへの接続が設定済みか。未設定なら「お試しログイン」で端末内だけで動く */
+const SB_READY=()=>!!(APP_CONFIG.supabaseUrl&&APP_CONFIG.supabaseAnonKey);
 
 /* ---------------- ユーティリティ ---------------- */
 const uid = (p="id") => p + "_" + Math.random().toString(36).slice(2,9);
@@ -636,9 +659,18 @@ const store={
   data:{templates:[]},
   all(){return this.data.templates},
   get(id){return this.data.templates.find(t=>t.id===id)},
-  save(t){t.updatedAt=Date.now(); idbPut(t).catch(()=>toast("保存に失敗しました（ストレージの空き容量をご確認ください）"))},
+  save(t){
+    t.updatedAt=Date.now();
+    idbPut(t).catch(()=>toast("保存に失敗しました（ストレージの空き容量をご確認ください）"));
+    SYNC.schedule();                       // 同じGoogleアカウントの他の端末へ反映する
+  },
   add(t){this.data.templates.unshift(t);this.save(t);return t},
-  remove(id){this.data.templates=this.data.templates.filter(t=>t.id!==id); idbDelete(id).catch(()=>{})},
+  remove(id){
+    this.data.templates=this.data.templates.filter(t=>t.id!==id);
+    idbDelete(id).catch(()=>{});
+    markDeleted(id);                       // 他の端末でも消えるように記録する
+    SYNC.schedule();
+  },
   async load(){
     const owner=currentOwnerId();
     this.data.templates=[];
@@ -725,15 +757,135 @@ const titleOf = t => t.kind==="elective" ? (t.subjectName||"（授業名未設�
 const subOf   = t => t.kind==="elective" ? `担当：${t.teacherName||"—"}` : `担任：${t.teacherName||"—"}`;
 
 /* =====================================================================
-   アカウント（ログイン・会員種別）
+   Supabase（認証・会員種別・決済の窓口）
    ---------------------------------------------------------------------
-   ★重要（本番運用にあたっての制約）★
-   このツールはサーバーを持たない静的サイトのため、会員種別はこの端末の
-   localStorageに保存しています。ブラウザ内の値は利用者自身が書き換えられるので、
-   これだけでは「プレミアム会員かどうか」を根拠に機能制限をかけることはできません。
-   課金と機能を確実に結びつけるには、Stripeのwebhookを受け取って会員状態を
-   保存・照会するサーバー（例：Cloud Functions + Firestore）が別途必要です。
-   その差し替え地点は AUTH.setPlan() と AUTH.refreshPlanFromServer() です。
+   SDKは使わず、公開されているREST APIをfetchで呼ぶ（依存ライブラリを増やさないため）。
+
+   会員種別(plan)はSupabaseのprofilesテーブルが正であり、
+   書き換えられるのはStripeのwebhookを受けるEdge Functionだけ。
+   ブラウザ側から plan を更新する経路は列レベル権限で塞いである。
+   ===================================================================== */
+const SESSION_KEY="seat-chart-session";
+const SB={
+  session:null,                       // {access_token,refresh_token,expires_at,user,provider_token}
+  loadSession(){
+    try{ this.session=JSON.parse(localStorage.getItem(SESSION_KEY)||"null") }
+    catch(e){ this.session=null }
+    return this.session;
+  },
+  saveSession(s){
+    this.session=s;
+    try{
+      if(s)localStorage.setItem(SESSION_KEY,JSON.stringify(s));
+      else localStorage.removeItem(SESSION_KEY);
+    }catch(e){}
+  },
+  headers(extra={}){
+    return {apikey:APP_CONFIG.supabaseAnonKey,
+            Authorization:"Bearer "+(this.session?.access_token||APP_CONFIG.supabaseAnonKey),
+            "Content-Type":"application/json",...extra};
+  },
+  /* Googleログインの画面へ送る。ドライブのアプリ専用領域も同時に許可してもらう */
+  signInWithGoogle(){
+    const redirect=location.origin+location.pathname;
+    const params=new URLSearchParams({
+      provider:"google",
+      redirect_to:redirect,
+      scopes:DRIVE_SCOPE,
+    });
+    location.href=`${APP_CONFIG.supabaseUrl}/auth/v1/authorize?${params}`;
+  },
+  /* ログイン後に戻ってきたURL（#access_token=...）からセッションを取り込む */
+  captureRedirect(){
+    if(!location.hash||location.hash.length<2)return false;
+    const p=new URLSearchParams(location.hash.slice(1));
+    const access=p.get("access_token");
+    if(!access)return false;
+    this.saveSession({
+      access_token:access,
+      refresh_token:p.get("refresh_token")||"",
+      expires_at:Date.now()+(Number(p.get("expires_in"))||3600)*1000,
+      provider_token:p.get("provider_token")||"",
+      user:null,
+    });
+    history.replaceState(null,"",location.pathname+location.search);
+    return true;
+  },
+  expired(){ return !this.session||Date.now()>(this.session.expires_at||0)-60000 },
+  /* 期限が近ければ更新する */
+  async ensureFresh(){
+    if(!this.session)return false;
+    if(!this.expired())return true;
+    if(!this.session.refresh_token){ this.saveSession(null); return false }
+    try{
+      const res=await fetch(`${APP_CONFIG.supabaseUrl}/auth/v1/token?grant_type=refresh_token`,{
+        method:"POST",
+        headers:{apikey:APP_CONFIG.supabaseAnonKey,"Content-Type":"application/json"},
+        body:JSON.stringify({refresh_token:this.session.refresh_token}),
+      });
+      if(!res.ok)throw new Error("セッションを更新できませんでした");
+      const d=await res.json();
+      this.saveSession({
+        access_token:d.access_token,
+        refresh_token:d.refresh_token||this.session.refresh_token,
+        expires_at:Date.now()+(Number(d.expires_in)||3600)*1000,
+        provider_token:this.session.provider_token||"",   // Googleの権限は別管理
+        user:d.user||this.session.user,
+      });
+      return true;
+    }catch(e){ this.saveSession(null); return false }
+  },
+  async getUser(){
+    if(!await this.ensureFresh())return null;
+    if(this.session.user)return this.session.user;
+    const res=await fetch(`${APP_CONFIG.supabaseUrl}/auth/v1/user`,{headers:this.headers()});
+    if(!res.ok)return null;
+    const user=await res.json();
+    this.saveSession({...this.session,user});
+    return user;
+  },
+  /* 会員種別をサーバーから取得する（これが唯一の正） */
+  async fetchProfile(){
+    if(!await this.ensureFresh())return null;
+    const res=await fetch(
+      `${APP_CONFIG.supabaseUrl}/rest/v1/profiles?select=*&id=eq.${this.session.user?.id||""}`,
+      {headers:this.headers()});
+    if(!res.ok)return null;
+    return (await res.json())[0]||null;
+  },
+  async updateDisplayName(name){
+    if(!await this.ensureFresh())return false;
+    const res=await fetch(
+      `${APP_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${this.session.user?.id||""}`,
+      {method:"PATCH",headers:this.headers({Prefer:"return=minimal"}),
+       body:JSON.stringify({display_name:name})});
+    return res.ok;
+  },
+  /* Edge Function の呼び出し（決済・解約） */
+  async callFunction(name,body={}){
+    if(!await this.ensureFresh())throw new Error("ログインが必要です");
+    const res=await fetch(`${APP_CONFIG.supabaseUrl}/functions/v1/${name}`,{
+      method:"POST",headers:this.headers(),body:JSON.stringify(body)});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(data.error||`処理できませんでした (${res.status})`);
+    return data;
+  },
+  async signOut(){
+    try{
+      if(this.session?.access_token){
+        await fetch(`${APP_CONFIG.supabaseUrl}/auth/v1/logout`,
+          {method:"POST",headers:this.headers()});
+      }
+    }catch(e){}
+    this.saveSession(null);
+  },
+};
+
+/* =====================================================================
+   アカウント（画面から見たログイン状態）
+   ---------------------------------------------------------------------
+   Supabaseのセッションとprofilesを、画面で使いやすい形にまとめたもの。
+   plan はサーバーの値をそのまま映すだけで、ここからは書き換えない。
    ===================================================================== */
 const ACCOUNT_KEY="seat-chart-account";
 const AUTH={
@@ -752,36 +904,35 @@ const AUTH={
   signedIn(){ return !!this.account },
   isPremium(){ return this.account?.plan==="premium" },
   displayName(){ return (this.account?.name||this.account?.email||"ゲスト") },
-  initials(){
-    const n=this.displayName().trim();
-    return n?n[0]:"？";
+  /* お試しログイン（Supabase未設定時に、この端末だけで動かすための入口） */
+  signInTrial(){
+    this.account={sub:uid("trial"),email:"",name:"お試しユーザー",picture:"",
+                  plan:"free",trial:true,updatedAt:Date.now()};
+    this.persist(); return this.account;
   },
-  signIn(profile,plan){
+  /* Supabaseのユーザーとprofilesから、画面用のアカウント情報を作る */
+  applyServer(user,profile){
     this.account={
-      sub:profile.sub||uid("local"),
-      email:profile.email||"",
-      name:profile.name||"",
-      picture:profile.picture||"",
-      plan:plan==="premium"?"premium":"free",
-      premiumSince:plan==="premium"?todayISO():"",
-      trial:!!profile.trial,          // GoogleクライアントID未設定時の「お試しログイン」
+      sub:user.id,
+      email:user.email||"",
+      name:profile?.display_name||user.user_metadata?.full_name||user.user_metadata?.name||"",
+      picture:user.user_metadata?.avatar_url||"",
+      plan:profile?.plan==="premium"?"premium":"free",
+      periodEnd:profile?.current_period_end||"",
+      cancelAtPeriodEnd:!!profile?.cancel_at_period_end,
+      trial:false,
+      seeded:this.account?.seeded&&this.account?.sub===user.id?true:this.account?.seeded,
       updatedAt:Date.now(),
     };
-    this.persist();
-    return this.account;
-  },
-  setPlan(plan){
-    if(!this.account)return;
-    this.account.plan=(plan==="premium")?"premium":"free";
-    this.account.premiumSince=this.account.plan==="premium"?(this.account.premiumSince||todayISO()):"";
-    this.account.updatedAt=Date.now();
-    this.persist();
+    // 別アカウントに切り替わったら見本投入の印は引き継がない
+    this.persist(); return this.account;
   },
   rename(name){
     if(!this.account)return;
     this.account.name=(name||"").trim();
     this.account.updatedAt=Date.now();
     this.persist();
+    if(!this.account.trial)SB.updateDisplayName(this.account.name).catch(()=>{});
   },
   signOut(){ this.account=null; this.persist(); },
   /* 見本データを投入済みかどうかの印。利用者が全テンプレートを削除したあと、
@@ -790,8 +941,14 @@ const AUTH={
     if(!this.account||this.account.seeded)return;
     this.account.seeded=true; this.persist();
   },
-  /* サーバーを用意したら、ここでStripeの購読状態を問い合わせて上書きする */
-  async refreshPlanFromServer(){ return this.account?.plan||null },
+  /* サーバーの会員種別を取り込み直す（決済の直後などに呼ぶ） */
+  async refreshPlanFromServer(){
+    if(!this.account||this.account.trial||!SB_READY())return this.account?.plan||null;
+    const user=await SB.getUser(); if(!user)return null;
+    const profile=await SB.fetchProfile();
+    this.applyServer(user,profile);
+    return this.account.plan;
+  },
 };
 /* データの持ち主を表すID。テンプレートはこの値で分離して保存する */
 function currentOwnerId(){ return AUTH.account?.sub||"" }
@@ -817,41 +974,239 @@ function loadGIS(){
   });
   return _gisPromise;
 }
-/* IDトークンから表示用のプロフィールを取り出す。
-   ※ここでは表示のために読むだけ。署名の検証はサーバー側で行う必要があります。 */
-function decodeJWT(token){
-  const b64=token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");
-  const bytes=Uint8Array.from(atob(b64),ch=>ch.charCodeAt(0));
-  return JSON.parse(new TextDecoder().decode(bytes));
-}
-function renderGoogleButton(container,onProfile,onError){
-  loadGIS().then(()=>{
-    google.accounts.id.initialize({
-      client_id:APP_CONFIG.googleClientId,
-      callback:res=>{
-        try{ onProfile(decodeJWT(res.credential)) }
-        catch(e){ onError(e) }
-      },
+/* =====================================================================
+   クラウド同期（Google Drive の appDataFolder）
+   ---------------------------------------------------------------------
+   「同じGoogleアカウントなら、別の端末でもデータが引き継がれる」ための保存先。
+
+   なぜ Drive の appDataFolder を選んだか：
+     - サーバーを用意しなくても、静的サイトのままアカウント単位の保存ができる
+     - 生徒名簿という個人情報を、開発者側のデータベースではなく
+       利用者本人のGoogleドライブ内に置ける（預かる範囲を最小にできる）
+     - appDataFolder は本アプリ専用の隠し領域で、ドライブの画面には現れない
+
+   保存の形（appDataFolder内）:
+     tpl_<テンプレートID>.json … テンプレート1件
+     _deleted.json             … 削除済みIDと削除時刻（端末間で削除を伝えるため）
+   ===================================================================== */
+const DRIVE_SCOPE="https://www.googleapis.com/auth/drive.appdata";
+const OAUTH_SCOPES=["openid","email","profile",DRIVE_SCOPE].join(" ");
+const TOMB_FILE="_deleted.json";
+
+const CLOUD={
+  token:null, tokenExpiresAt:0, client:null,
+  configured(){ return !!APP_CONFIG.googleClientId },
+  hasToken(){ return !!this.token&&Date.now()<this.tokenExpiresAt-60000 },
+
+  /* アクセストークンを取得する。interactive=false なら同意画面を出さずに静かに更新を試みる
+     （ページを再読込した直後など、すでに同意済みのケースを想定） */
+  async getToken(interactive){
+    if(this.hasToken())return this.token;
+    // ログイン直後はSupabaseがGoogleのアクセストークンを渡してくれるので、それを使う
+    if(SB.session?.provider_token){
+      this.token=SB.session.provider_token;
+      this.tokenExpiresAt=Date.now()+55*60*1000;
+      return this.token;
+    }
+    if(!this.configured())throw new Error("GoogleクライアントIDが未設定です");
+    await loadGIS();
+    return new Promise((resolve,reject)=>{
+      this.client=google.accounts.oauth2.initTokenClient({
+        client_id:APP_CONFIG.googleClientId,
+        scope:OAUTH_SCOPES,
+        callback:res=>{
+          if(res&&res.access_token){
+            this.token=res.access_token;
+            this.tokenExpiresAt=Date.now()+(Number(res.expires_in)||3600)*1000;
+            resolve(this.token);
+          }else reject(new Error(res?.error_description||res?.error||"アクセス権を取得できませんでした"));
+        },
+        error_callback:err=>reject(new Error(err?.type==="popup_closed"
+          ?"ログインの画面が閉じられました":(err?.message||"ログインできませんでした"))),
+      });
+      this.client.requestAccessToken(interactive?{}:{prompt:""});
     });
-    google.accounts.id.renderButton(container,
-      {theme:"outline",size:"large",shape:"pill",text:"continue_with",locale:"ja",width:260});
-  }).catch(onError);
+  },
+  clearToken(){ this.token=null; this.tokenExpiresAt=0 },
+
+  /* Drive APIの呼び出し。トークン切れ(401)は1度だけ静かに取り直して再試行する */
+  async api(url,opts={},retry=true){
+    const token=await this.getToken(false).catch(e=>{ if(retry)throw e; return null });
+    const res=await fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:"Bearer "+token}});
+    if(res.status===401&&retry){ this.clearToken(); return this.api(url,opts,false) }
+    if(!res.ok)throw new Error(`Drive APIエラー (${res.status})`);
+    return res;
+  },
+  async listFiles(){
+    const url="https://www.googleapis.com/drive/v3/files"
+      +"?spaces=appDataFolder&pageSize=1000&fields=files(id,name,modifiedTime)";
+    const res=await this.api(url);
+    return (await res.json()).files||[];
+  },
+  async download(fileId){
+    const res=await this.api(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+    return res.json();
+  },
+  async upload(name,obj,fileId){
+    const body=new FormData();
+    body.append("metadata",new Blob([JSON.stringify(
+      fileId?{name}:{name,parents:["appDataFolder"]})],{type:"application/json"}));
+    body.append("file",new Blob([JSON.stringify(obj)],{type:"application/json"}));
+    const url=fileId
+      ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`
+      : "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
+    const res=await this.api(url,{method:fileId?"PATCH":"POST",body});
+    return res.json();
+  },
+  async remove(fileId){
+    await this.api(`https://www.googleapis.com/drive/v3/files/${fileId}`,{method:"DELETE"});
+  },
+};
+
+/* ---- 同期の中身 ---- */
+const TOMB_KEY="seat-chart-deleted";
+function loadTombstones(){
+  try{ return JSON.parse(localStorage.getItem(TOMB_KEY)||"{}") }catch(e){ return {} }
+}
+function saveTombstones(t){
+  try{ localStorage.setItem(TOMB_KEY,JSON.stringify(t)) }catch(e){}
+}
+/* テンプレートを削除したことを記録する（他の端末へ「消した」と伝えるため） */
+function markDeleted(id){
+  const t=loadTombstones(); t[id]=Date.now(); saveTombstones(t);
 }
 
-/* ---------------- Stripe（プレミアム会員の決済） ----------------
-   静的サイトから安全に扱えるのは「Payment Link」（公開URL）だけです。
-   決済完了後の戻り先URLに ?checkout=success を付けておくと、戻ったときに会員種別へ反映します。 */
-function stripeCheckoutUrl(){
-  if(!APP_CONFIG.stripePaymentLink)return "";
-  try{
-    const u=new URL(APP_CONFIG.stripePaymentLink);
-    const a=AUTH.account;
-    if(a){
-      if(a.sub)u.searchParams.set("client_reference_id",a.sub); // webhookで会員と突き合わせるため
-      if(a.email)u.searchParams.set("prefilled_email",a.email);
+/* ローカルとリモートを突き合わせて、あるべき状態を決める純関数。
+   ・削除記録が更新時刻より新しければ削除を優先
+   ・そうでなければ updatedAt が新しい側を採用 */
+function mergeTemplates(local,remote,tomb){
+  const result=new Map(), toUpload=[], toDeleteRemote=[];
+  const deletedAfter=(id,t)=>tomb[id]&&tomb[id]>=(t?.updatedAt||0);
+
+  remote.forEach(({tpl,fileId})=>{
+    if(!tpl||!tpl.id)return;
+    if(deletedAfter(tpl.id,tpl)){ toDeleteRemote.push(fileId); return }
+    result.set(tpl.id,{tpl,fileId});
+  });
+  local.forEach(tpl=>{
+    if(deletedAfter(tpl.id,tpl))return;                 // この端末で削除済み
+    const hit=result.get(tpl.id);
+    if(!hit){ result.set(tpl.id,{tpl,fileId:null}); toUpload.push(tpl.id); return }
+    if((tpl.updatedAt||0)>(hit.tpl.updatedAt||0)){       // ローカルの方が新しい
+      result.set(tpl.id,{tpl,fileId:hit.fileId});
+      toUpload.push(tpl.id);
     }
-    return u.toString();
-  }catch(e){ return APP_CONFIG.stripePaymentLink }
+  });
+  return {
+    merged:[...result.values()],
+    toUpload:[...new Set(toUpload)],
+    toDeleteRemote,
+  };
+}
+
+const SYNC={
+  state:"off",          // off | idle | syncing | ok | error
+  lastAt:0, lastError:"", timer:null,
+  available(){ return CLOUD.configured()&&AUTH.signedIn()&&!AUTH.account?.trial },
+  label(){
+    if(!this.available())return "この端末のみに保存";
+    if(this.state==="syncing")return "同期中…";
+    if(this.state==="error")return "同期できませんでした";
+    if(this.state==="ok"&&this.lastAt)return "同期済み "+jpDT(this.lastAt);
+    return "未同期";
+  },
+  /* 保存のたびに呼ばれる。まとめて送るため少し待ってから実行する */
+  schedule(){
+    if(!this.available())return;
+    clearTimeout(this.timer);
+    this.timer=setTimeout(()=>this.run({quiet:true}),2500);
+  },
+  async run({quiet}={}){
+    if(!this.available()){ this.state="off"; return false }
+    if(this.state==="syncing")return false;
+    this.state="syncing"; if(!quiet)refreshSyncUI();
+    try{
+      const owner=currentOwnerId();
+      const files=await CLOUD.listFiles();
+      const tombFile=files.find(f=>f.name===TOMB_FILE)||null;
+
+      // 削除記録をローカルとリモートで統合する
+      let tomb=loadTombstones();
+      if(tombFile){
+        const remoteTomb=await CLOUD.download(tombFile.id).catch(()=>({}));
+        Object.entries(remoteTomb||{}).forEach(([id,at])=>{
+          if(!tomb[id]||at>tomb[id])tomb[id]=at;
+        });
+      }
+
+      // リモートのテンプレートを読み込む
+      const remote=[];
+      for(const f of files.filter(f=>/^tpl_.*\.json$/.test(f.name))){
+        const tpl=await CLOUD.download(f.id).catch(()=>null);
+        if(tpl)remote.push({tpl,fileId:f.id});
+      }
+
+      const {merged,toUpload,toDeleteRemote}=mergeTemplates(store.all(),remote,tomb);
+
+      // 反映：リモートへ書き込み／削除
+      for(const fileId of toDeleteRemote)await CLOUD.remove(fileId).catch(()=>{});
+      const byId=new Map(merged.map(m=>[m.tpl.id,m]));
+      for(const id of toUpload){
+        const m=byId.get(id); if(!m)continue;
+        const saved=await CLOUD.upload(`tpl_${id}.json`,m.tpl,m.fileId);
+        if(saved?.id)m.fileId=saved.id;
+      }
+      await CLOUD.upload(TOMB_FILE,tomb,tombFile?.id);
+      saveTombstones(tomb);
+
+      // 反映：この端末へ（自分のデータとして取り込む）
+      const list=merged.map(m=>m.tpl).filter(t=>t&&t.id);
+      list.forEach(t=>{ if(!t.ownerId)t.ownerId=owner });
+      Object.keys(tomb).forEach(id=>{ idbDelete(id).catch(()=>{}) });
+      await Promise.all(list.map(t=>idbPut(t)));
+      store.data.templates=list.sort((a,b)=>b.createdAt-a.createdAt);
+
+      this.state="ok"; this.lastAt=Date.now(); this.lastError="";
+      return true;
+    }catch(err){
+      this.state="error"; this.lastError=String(err&&err.message||err);
+      return false;
+    }finally{
+      refreshSyncUI();
+    }
+  },
+};
+/* 同期状態の表示だけを更新する（画面全体を作り直さない） */
+function refreshSyncUI(){
+  document.querySelectorAll("[data-sync-label]").forEach(n=>{n.textContent=SYNC.label()});
+}
+
+/* ---- ログイン用のGoogleボタン ----
+   Supabaseの認証画面へ送り出す。ドライブのアプリ専用領域の許可も同時に取得する。 */
+function googleButton(){
+  const g=`<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.91c1.7-1.57 2.69-3.88 2.69-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.91-2.26c-.81.54-1.84.86-3.05.86-2.35 0-4.34-1.58-5.05-3.71H1.03v2.34A8.99 8.99 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.95 10.71a5.41 5.41 0 0 1 0-3.42V4.95H1.03a8.99 8.99 0 0 0 0 8.1l2.92-2.34z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.58-2.58c-1.56-1.45-3.6-2.35-6.02-2.35A8.99 8.99 0 0 0 1.03 4.95l2.92 2.34C4.66 5.16 6.65 3.58 9 3.58z"/></svg>`;
+  const btn=el("button",{class:"gbtn",onclick:()=>{
+    btn.disabled=true;
+    // プレミアム希望で入った場合は、戻ってきたあとに決済へ進めるよう覚えておく
+    try{ sessionStorage.setItem("seat-chart-intent",LOGIN_INTENT) }catch(e){}
+    SB.signInWithGoogle();
+  }},el("span",{class:"gbtn-ic",html:g}),el("span",{text:"Googleでログイン"}));
+  return btn;
+}
+let LOGIN_INTENT="free";
+
+/* ---------------- Stripe（プレミアム会員の決済） ----------------
+   決済ページの作成も解約も、シークレットキーを持つEdge Function側で行う。
+   ブラウザ側は「作ってもらったURLへ移動するだけ」なので、金額や商品を改ざんできない。 */
+async function startCheckout(){
+  const {url}=await SB.callFunction("create-checkout-session");
+  if(!url)throw new Error("決済ページを開けませんでした");
+  location.href=url;
+}
+async function openBillingPortal(){
+  const {url}=await SB.callFunction("create-portal-session");
+  if(!url)throw new Error("管理画面を開けませんでした");
+  location.href=url;
 }
 function consumeCheckoutReturn(){
   const q=new URLSearchParams(location.search);
@@ -903,11 +1258,12 @@ function viewLogin(){
     return card;
   };
   const freeCard=planCard("free","無料会員","0円",
-    ["Googleアカウントを選ぶだけ","座席表の作成・印刷","データはこの端末に保存"]);
+    ["Googleアカウントを選ぶだけ","座席表の作成・印刷","同じアカウントなら端末をまたいで利用"]);
   const premCard=planCard("premium","プレミアム会員",APP_CONFIG.premiumPriceLabel,
     ["無料会員のすべての機能","今後の追加機能を利用可能","開発の継続を応援できます"]);
 
   function syncPlan(){
+    LOGIN_INTENT=plan;
     [freeCard,premCard].forEach(c=>c.classList.toggle("on",c.dataset.plan===plan));
     notice.textContent = plan==="premium"
       ? "Googleでログインしたあと、決済画面（Stripe）へ進みます。"
@@ -915,32 +1271,29 @@ function viewLogin(){
   }
   syncPlan();
 
-  /* ログイン成立後の共通処理。プレミアムを選んでいれば決済へ案内する */
-  function afterSignIn(profile){
-    AUTH.signIn(profile,"free");        // 決済の確認が取れるまでは無料会員として開始する
-    // このアカウントのデータだけを読み直す（別の先生のデータが見えないようにする）
-    reloadForAccount().then(()=>{
-      if(plan==="premium")dlgUpgrade({fromLogin:true});
-      else toast("ログインしました");
-    });
-  }
-
-  if(APP_CONFIG.googleClientId){
-    renderGoogleButton(gbtn,afterSignIn,err=>{
-      gbtn.innerHTML="";
-      gbtn.append(el("div",{class:"alert"},
-        el("h4",{text:"Googleログインを利用できません"}),
-        el("div",{text:String(err&&err.message||err)})));
-    });
+  if(SB_READY()){
+    gbtn.append(
+      googleButton(),
+      el("p",{class:"login-hint",
+        text:"ログイン時に、端末をまたいでデータを引き継ぐための保存領域（Googleドライブのアプリ専用領域）の利用を確認します。ドライブ内のほかのファイルは読み書きしません。"}));
   }else{
-    // クライアントID未設定でも動作を確認できるようにする
+    // 未設定でも動作を確認できるようにする
     gbtn.append(
       el("button",{class:"btn btn-primary btn-lg",style:{width:"100%"},
-        onclick:()=>afterSignIn({sub:uid("trial"),name:"お試しユーザー",email:"",trial:true})},
+        onclick:()=>{
+          AUTH.signInTrial();
+          reloadForAccount().then(()=>toast("お試しモードで開始しました（この端末のみに保存）"));
+        }},
         "お試しログイン（設定なしで開始）"),
       el("p",{class:"login-hint",html:
-        "Googleログインを有効にするには、<code>APP_CONFIG.googleClientId</code> にOAuthクライアントIDを設定してください。"}));
+        "Googleログインと端末間の引き継ぎを有効にするには、<code>APP_CONFIG.supabaseUrl</code> と <code>supabaseAnonKey</code> を設定してください。お試しモードではこの端末のみに保存されます。"}));
   }
+
+  const legal=el("p",{class:"login-legal"},
+    el("a",{class:"link",href:APP_CONFIG.termsUrl,target:"_blank",rel:"noopener noreferrer"},"利用規約"),
+    " と ",
+    el("a",{class:"link",href:APP_CONFIG.privacyUrl,target:"_blank",rel:"noopener noreferrer"},"プライバシーポリシー"),
+    " に同意のうえご利用ください。");
 
   return el("div",{class:"login"},
     el("div",{class:"login-card"},
@@ -951,6 +1304,7 @@ function viewLogin(){
       el("div",{class:"plans"},freeCard,premCard),
       notice,
       gbtn,
+      legal,
       el("div",{class:"login-foot"},
         APP_CONFIG.corporateContactUrl
           ? el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約はこちら")
@@ -987,7 +1341,16 @@ function gearButton(){
         el("div",{class:"gear-name",text:AUTH.displayName()}),
         el("div",{class:"gear-plan"},
           el("span",{class:"chip "+(AUTH.isPremium()?"chip-a":"chip-g"),
-            text:AUTH.isPremium()?"プレミアム会員":"無料会員"}))),
+            text:AUTH.isPremium()?"プレミアム会員":"無料会員"})),
+        el("div",{class:"gear-sync","data-sync-label":"",text:SYNC.label()})),
+      SYNC.available()
+        ? el("button",{class:"gear-item",onclick:async e=>{
+            const b=e.currentTarget; b.textContent="同期中…";
+            const ok=await SYNC.run();
+            closeGear(); render();
+            toast(ok?"同期しました":("同期できませんでした："+SYNC.lastError));
+          }},"今すぐ同期")
+        : null,
       el("button",{class:"gear-item",onclick:()=>{closeGear();dlgAccount()}},"アカウント設定"),
       el("button",{class:"gear-item",onclick:()=>{closeGear();dlgContact()}},"問い合わせ"),
       el("button",{class:"gear-item danger",onclick:()=>{closeGear();dlgSignOut()}},"ログアウト"));
@@ -1002,12 +1365,19 @@ function dlgAccount(){
   const planRow=AUTH.isPremium()
     ? el("div",{},
         el("div",{class:"note"},el("b",{text:"プレミアム会員です。"}),
-          AUTH.account?.premiumSince?el("span",{text:`（${jpDate(AUTH.account.premiumSince)}から）`}):null),
-        // 解約はStripe側の手続きが必要。この画面の表示を変えるだけでは課金は止まらないので明記する
-        el("p",{style:{marginTop:"12px",fontSize:"13px",color:"var(--ink2)",lineHeight:"1.7"}},
-          "解約をご希望の場合は、Stripeから届いた領収書メールのリンク、または",
-          el("button",{class:"link",onclick:()=>{closeModal();dlgContact()}},"問い合わせ"),
-          "からお手続きください。この画面の表示を切り替えるだけでは、自動更新は停止しません。"))
+          AUTH.account?.periodEnd
+            ? el("div",{style:{marginTop:"4px"},text:(AUTH.account.cancelAtPeriodEnd?"利用できるのは ":"次回の更新日は ")
+                +jpDate(String(AUTH.account.periodEnd).slice(0,10))+(AUTH.account.cancelAtPeriodEnd?" までです":" です")})
+            : null),
+        // 解約はStripeの正規画面で行ってもらう（表示を変えるだけでは自動更新は止まらない）
+        el("p",{style:{marginTop:"12px",fontSize:"13px",color:"var(--ink2)",lineHeight:"1.7"},
+          text:"解約・お支払い方法の変更・領収書の確認は、Stripeの管理画面で行えます。"}),
+        el("button",{class:"btn",style:{marginTop:"8px"},onclick:async e=>{
+          const b=e.currentTarget; b.disabled=true; b.textContent="開いています…";
+          try{ await openBillingPortal() }
+          catch(err){ b.disabled=false; b.textContent="お支払い・解約の管理";
+            toast(String(err&&err.message||err)) }
+        }},"お支払い・解約の管理"))
     : el("div",{},
         el("div",{class:"note",style:{marginBottom:"10px"},
           text:`プレミアム会員（${APP_CONFIG.premiumPriceLabel}）に変更すると、今後の追加機能をご利用いただけます。`}),
@@ -1018,13 +1388,7 @@ function dlgAccount(){
     body:el("div",{},
       el("label",{class:"field"},el("span",{text:"表示名"}),nameIn),
       el("div",{class:"eyebrow",style:{margin:"18px 0 8px"},text:"会員種別"}),
-      planRow,
-      // 決済リンク未設定（＝動作確認中）のときだけ、表示を戻す手段を用意する
-      (AUTH.isPremium()&&!APP_CONFIG.stripePaymentLink)
-        ? el("button",{class:"btn btn-sm",style:{marginTop:"12px"},onclick:()=>{
-            AUTH.setPlan("free");closeModal();render();toast("表示を無料会員に戻しました（動作確認用）");
-          }},"表示を無料会員に戻す（動作確認用）")
-        : null),
+      planRow),
     footer:[
       el("button",{class:"btn",onclick:closeModal},"閉じる"),
       el("button",{class:"btn btn-primary",onclick:()=>{
@@ -1033,24 +1397,31 @@ function dlgAccount(){
 }
 
 function dlgUpgrade({fromLogin}){
-  const url=stripeCheckoutUrl();
   const body=el("div",{},
     el("div",{class:"note"},
       el("b",{text:`プレミアム会員：${APP_CONFIG.premiumPriceLabel}`}),
-      el("div",{style:{marginTop:"5px"},text:"お支払いはStripeの安全な決済ページで行われます。カード情報がこのツールに保存されることはありません。"})),
+      el("div",{style:{marginTop:"5px"},text:"お支払いはStripeの決済ページで行われます。カード情報がこのツールに渡ることはありません。"})),
     fromLogin?el("p",{style:{marginTop:"12px",fontSize:"13.5px",color:"var(--ink2)"},
-      text:"いま無料会員としてログインしています。決済が完了するとプレミアム会員に切り替わります。"}):null);
+      text:"いまは無料会員としてご利用いただけます。お支払いが完了するとプレミアム会員に切り替わります。"}):null,
+    el("p",{style:{marginTop:"12px",fontSize:"12.5px",color:"var(--ink3)",lineHeight:"1.7"}},
+      "自動更新（年額）です。解約はいつでも「アカウント設定」から行えます。",
+      el("br"),
+      el("a",{class:"link",href:APP_CONFIG.termsUrl,target:"_blank",rel:"noopener noreferrer"},"利用規約"),
+      " をご確認ください。"));
+
   const footer=[el("button",{class:"btn",onclick:closeModal},"あとで")];
-  if(url){
-    footer.push(el("a",{class:"btn btn-primary",href:url},"決済ページへ進む"));
+  if(SB_READY()&&!AUTH.account?.trial){
+    const go=el("button",{class:"btn btn-primary",onclick:async()=>{
+      go.disabled=true; go.textContent="決済ページを準備中…";
+      try{ await startCheckout() }
+      catch(err){ go.disabled=false; go.textContent="決済ページへ進む";
+        toast(String(err&&err.message||err)) }
+    }},"決済ページへ進む");
+    footer.push(go);
   }else{
     body.append(el("div",{class:"alert",style:{marginTop:"14px"}},
-      el("h4",{text:"決済リンクが未設定です"}),
-      el("div",{html:"Stripeで作成したPayment LinkのURLを <code>APP_CONFIG.stripePaymentLink</code> に設定してください。"})));
-    // 設定前でもプレミアム画面の見え方を確認できるようにする（決済は行われません）
-    footer.push(el("button",{class:"btn",onclick:()=>{
-      AUTH.setPlan("premium");closeModal();render();toast("プレミアム会員として設定しました（動作確認用）");
-    }},"確認用に切り替える"));
+      el("h4",{text:"決済はまだご利用いただけません"}),
+      el("div",{text:"お試しモードでは決済を行えません。Supabaseの設定を行い、Googleアカウントでログインしてください。"})));
   }
   modal({title:"プレミアム会員へのお申し込み",body,footer});
 }
@@ -1082,9 +1453,12 @@ function dlgSignOut(){
       el("p",{style:{marginTop:"12px",fontSize:"12.5px",color:"var(--ink2)"},
         text:"共用のパソコンで完全にデータを消したい場合は、各テンプレートを削除してからログアウトしてください。"})),
     footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
-      el("button",{class:"btn btn-danger",onclick:()=>{
-        AUTH.signOut();closeModal();
-        if(window.google?.accounts?.id)try{google.accounts.id.disableAutoSelect()}catch(e){}
+      el("button",{class:"btn btn-danger",onclick:async()=>{
+        closeModal();
+        // 未送信の変更があれば、消える前にクラウドへ送っておく
+        if(SYNC.available())await SYNC.run({quiet:true});
+        await SB.signOut();
+        AUTH.signOut(); CLOUD.clearToken();
         R.view="home";R.tplId=null;R.chartId=null;
         // 表示中のデータをメモリからも破棄する（次にログインした人に見えないようにする）
         reloadForAccount().then(()=>toast("ログアウトしました"));
@@ -2495,20 +2869,67 @@ document.addEventListener("keydown",e=>{
   else if(!inField&&e.key.toLowerCase()==="s"){E.mode=E.mode==="swap"?"place":"swap";E.sel=null;renderEditorBody()}
 });
 
-/* ---- 起動 ---- */
-AUTH.load();
-(function handleCheckoutReturn(){
-  const r=consumeCheckoutReturn();
-  if(!r)return;
-  if(r==="success"&&AUTH.signedIn()){
-    // 決済ページから戻ってきた合図。確実な判定にはサーバー側でのwebhook照会が必要（AUTH.refreshPlanFromServer）
-    AUTH.setPlan("premium");
-    setTimeout(()=>toast("プレミアム会員になりました。ありがとうございます"),300);
-  }else if(r==="cancel"){
-    setTimeout(()=>toast("決済を中止しました"),300);
+/* =====================================================================
+   起動
+   ===================================================================== */
+/* 決済から戻ったとき、webhookの反映を少し待ってから会員種別を取り直す。
+   webhookは通常すぐ届くが、数秒遅れることがあるため何度か確認する。 */
+async function settleCheckoutReturn(result){
+  if(result==="cancel"){ toast("お申し込みを中止しました"); return }
+  if(result!=="success")return;
+  toast("お支払いを確認しています…");
+  for(let i=0;i<6;i++){
+    const plan=await AUTH.refreshPlanFromServer();
+    if(plan==="premium"){ render(); toast("プレミアム会員になりました。ありがとうございます"); return }
+    await new Promise(r=>setTimeout(r,1500));
   }
-})();
-store.load().then(render);
+  render();
+  toast("お支払いの反映に時間がかかっています。数分後に再度ご確認ください");
+}
+
+async function boot(){
+  AUTH.load();
+  const checkout=consumeCheckoutReturn();
+
+  if(SB_READY()){
+    // ログイン画面から戻ってきた直後ならセッションを取り込む
+    const justLoggedIn=SB.captureRedirect();
+    if(!SB.session)SB.loadSession();
+
+    if(SB.session){
+      const user=await SB.getUser();
+      if(user){
+        const profile=await SB.fetchProfile();
+        AUTH.applyServer(user,profile);
+      }else{
+        AUTH.signOut();          // セッションが無効になっていた
+      }
+    }else if(!AUTH.account?.trial){
+      AUTH.signOut();            // お試し以外はセッションが必要
+    }
+
+    await store.load();
+    render();
+
+    if(AUTH.signedIn()&&SYNC.available()){
+      await SYNC.run({quiet:true});
+      render();
+    }
+    if(justLoggedIn){
+      let intent="free";
+      try{ intent=sessionStorage.getItem("seat-chart-intent")||"free";
+           sessionStorage.removeItem("seat-chart-intent") }catch(e){}
+      if(intent==="premium"&&!AUTH.isPremium())dlgUpgrade({fromLogin:true});
+      else toast("ログインしました");
+    }
+  }else{
+    await store.load();
+    render();
+  }
+
+  if(checkout)await settleCheckoutReturn(checkout);
+}
+boot();
 </script>
 </body>
 </html>
