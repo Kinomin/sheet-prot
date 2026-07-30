@@ -267,6 +267,66 @@ table.tbl tr:hover td{background:#f8fafd}
 .card .g{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .card .g.m{background:var(--indigo)} .card .g.f{background:var(--vermilion)}
 
+/* ---------- ログイン ---------- */
+.login{min-height:100%;display:flex;align-items:center;justify-content:center;padding:28px 18px 48px}
+.login-card{
+  width:100%;max-width:470px;background:var(--card);border:1.5px solid var(--line);
+  border-radius:18px;padding:28px 26px 24px;box-shadow:0 18px 50px -26px rgba(22,29,41,.4);
+}
+.login-brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+.login-brand b{font-size:17px;font-weight:800;letter-spacing:.01em}
+.login-brand .mark{width:34px;height:34px;border-radius:8px;background-size:11px 11px;background-position:5px 5px}
+.login-sub{font-size:12.5px;color:var(--ink3);margin-top:2px}
+.plans{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-bottom:16px}
+.plan{
+  text-align:left;padding:14px 14px 12px;border:2px solid var(--line);border-radius:13px;
+  background:var(--card);transition:.13s;
+}
+.plan:hover{border-color:var(--ink3)}
+.plan.on{border-color:var(--indigo);background:var(--indigo-t);box-shadow:0 0 0 3px var(--indigo-t)}
+.plan-h{display:flex;flex-direction:column;gap:2px;margin-bottom:9px}
+.plan-h b{font-size:14.5px;font-weight:800}
+.plan-price{font-family:var(--mono);font-size:12.5px;font-weight:700;color:var(--indigo)}
+.plan.on .plan-price{color:var(--indigo-d)}
+.plan-ul{list-style:none;display:flex;flex-direction:column;gap:4px}
+.plan-ul li{font-size:11.5px;color:var(--ink2);line-height:1.45;padding-left:12px;position:relative}
+.plan-ul li::before{content:"✓";position:absolute;left:0;color:var(--moss);font-weight:800}
+.login-note{font-size:12.5px;color:var(--ink2);margin-bottom:16px;min-height:18px}
+.gbtn-slot{display:flex;flex-direction:column;align-items:center;gap:10px;min-height:44px}
+.login-hint{font-size:11.5px;color:var(--ink3);line-height:1.55;text-align:center}
+.login-hint code,.alert code,.note code{font-family:var(--mono);font-size:.92em;background:#eef1f6;padding:1px 4px;border-radius:3px}
+.login-foot{margin-top:20px;padding-top:16px;border-top:1px solid var(--line2);text-align:center}
+.link{
+  background:none;border:none;padding:0;font-size:13.5px;font-weight:600;
+  color:var(--indigo);text-decoration:underline;text-underline-offset:2px;cursor:pointer;
+}
+.link:hover{color:var(--indigo-d)}
+@media (max-width:420px){ .plans{grid-template-columns:1fr} }
+
+/* ---------- 設定メニュー ---------- */
+.gear-wrap{position:relative;flex:0 0 auto}
+.gear{
+  width:38px;height:38px;border-radius:50%;border:1.5px solid var(--line);background:var(--card);
+  font-size:17px;line-height:1;display:flex;align-items:center;justify-content:center;color:var(--ink2);
+}
+.gear:hover{border-color:var(--ink3);background:#fbfcfe}
+.gear-menu{
+  position:absolute;top:46px;right:0;z-index:60;min-width:214px;
+  background:var(--card);border:1.5px solid var(--line);border-radius:12px;
+  box-shadow:0 14px 40px -14px rgba(22,29,41,.42);overflow:hidden;
+}
+.gear-who{padding:13px 15px 11px;border-bottom:1px solid var(--line2)}
+.gear-name{font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gear-plan{margin-top:6px}
+.gear-item{
+  display:block;width:100%;text-align:left;padding:11px 15px;font-size:13.5px;font-weight:600;
+  color:var(--ink);border-bottom:1px solid var(--line2);
+}
+.gear-item:last-child{border-bottom:none}
+.gear-item:hover{background:var(--indigo-t);color:var(--indigo-d)}
+.gear-item.danger{color:var(--vermilion)}
+.gear-item.danger:hover{background:var(--vermilion-t)}
+
 /* ---------- モーダル ---------- */
 .mask{position:fixed;inset:0;background:rgba(22,29,41,.46);display:flex;align-items:center;justify-content:center;padding:22px;z-index:50}
 .modal{background:var(--card);border-radius:15px;width:100%;max-width:520px;max-height:88vh;overflow:auto;box-shadow:0 22px 60px -18px rgba(22,29,41,.5)}
@@ -386,6 +446,32 @@ table.tbl tr:hover td{background:#f8fafd}
    本ファイルは画面遷移・操作性・座席アルゴリズムの検証用モック。
    store.* をIndexedDBアダプタに差し替えれば永続化に移行できる構造。
    ===================================================================== */
+
+/* =====================================================================
+   設定（ここだけ書き換えれば本番のGoogleログイン／Stripe決済につながります）
+   ---------------------------------------------------------------------
+   ここに入れる値はいずれも「公開して問題のない値」だけです。
+   Stripeのシークレットキー(sk_...)は絶対にこのファイルへ書かないでください。
+   ブラウザに置いた値は誰でも読めるため、決済の改ざんにつながります。
+   ===================================================================== */
+const APP_CONFIG={
+  // Google Cloud Console →「APIとサービス」→「認証情報」→ OAuth 2.0 クライアントID（ウェブ）
+  // 承認済みJavaScript生成元に https://kinomin.github.io を登録してください。
+  // 公開前提の値なのでコミットして構いません。空のままでも「お試しログイン」で動作します。
+  googleClientId:"",
+
+  // Stripeダッシュボード →「商品」→ 500円/年の商品を作成 →「Payment Link」を発行して貼り付け。
+  // Payment LinkのURLは公開前提なので安全です。
+  stripePaymentLink:"",
+
+  // 法人契約の問い合わせ先（お問い合わせフォームのURLなど）
+  corporateContactUrl:"",
+
+  // 問い合わせ先メールアドレス
+  supportEmail:"",
+
+  premiumPriceLabel:"500円 / 年",
+};
 
 /* ---------------- ユーティリティ ---------------- */
 const uid = (p="id") => p + "_" + Math.random().toString(36).slice(2,9);
@@ -596,6 +682,129 @@ function seed(){
 const titleOf = t => t.kind==="elective" ? (t.subjectName||"（授業名未設定）") : (t.className||"（クラス名未設定）");
 const subOf   = t => t.kind==="elective" ? `担当：${t.teacherName||"—"}` : `担任：${t.teacherName||"—"}`;
 
+/* =====================================================================
+   アカウント（ログイン・会員種別）
+   ---------------------------------------------------------------------
+   ★重要（本番運用にあたっての制約）★
+   このツールはサーバーを持たない静的サイトのため、会員種別はこの端末の
+   localStorageに保存しています。ブラウザ内の値は利用者自身が書き換えられるので、
+   これだけでは「プレミアム会員かどうか」を根拠に機能制限をかけることはできません。
+   課金と機能を確実に結びつけるには、Stripeのwebhookを受け取って会員状態を
+   保存・照会するサーバー（例：Cloud Functions + Firestore）が別途必要です。
+   その差し替え地点は AUTH.setPlan() と AUTH.refreshPlanFromServer() です。
+   ===================================================================== */
+const ACCOUNT_KEY="seat-chart-account";
+const AUTH={
+  account:null,
+  load(){
+    try{ this.account=JSON.parse(localStorage.getItem(ACCOUNT_KEY)||"null") }
+    catch(e){ this.account=null }
+    return this.account;
+  },
+  persist(){
+    try{
+      if(this.account)localStorage.setItem(ACCOUNT_KEY,JSON.stringify(this.account));
+      else localStorage.removeItem(ACCOUNT_KEY);
+    }catch(e){ /* プライベートモード等で書けない場合はこのセッション限りとなる */ }
+  },
+  signedIn(){ return !!this.account },
+  isPremium(){ return this.account?.plan==="premium" },
+  displayName(){ return (this.account?.name||this.account?.email||"ゲスト") },
+  initials(){
+    const n=this.displayName().trim();
+    return n?n[0]:"？";
+  },
+  signIn(profile,plan){
+    this.account={
+      sub:profile.sub||uid("local"),
+      email:profile.email||"",
+      name:profile.name||"",
+      picture:profile.picture||"",
+      plan:plan==="premium"?"premium":"free",
+      premiumSince:plan==="premium"?todayISO():"",
+      trial:!!profile.trial,          // GoogleクライアントID未設定時の「お試しログイン」
+      updatedAt:Date.now(),
+    };
+    this.persist();
+    return this.account;
+  },
+  setPlan(plan){
+    if(!this.account)return;
+    this.account.plan=(plan==="premium")?"premium":"free";
+    this.account.premiumSince=this.account.plan==="premium"?(this.account.premiumSince||todayISO()):"";
+    this.account.updatedAt=Date.now();
+    this.persist();
+  },
+  rename(name){
+    if(!this.account)return;
+    this.account.name=(name||"").trim();
+    this.account.updatedAt=Date.now();
+    this.persist();
+  },
+  signOut(){ this.account=null; this.persist(); },
+  /* サーバーを用意したら、ここでStripeの購読状態を問い合わせて上書きする */
+  async refreshPlanFromServer(){ return this.account?.plan||null },
+};
+
+/* ---------------- Googleログイン（Google Identity Services） ---------------- */
+let _gisPromise=null;
+function loadGIS(){
+  if(_gisPromise)return _gisPromise;
+  _gisPromise=new Promise((resolve,reject)=>{
+    if(window.google?.accounts?.id)return resolve();
+    const s=document.createElement("script");
+    s.src="https://accounts.google.com/gsi/client";
+    s.async=true; s.defer=true;
+    s.onload=()=>resolve();
+    s.onerror=()=>reject(new Error("Googleログインを読み込めませんでした"));
+    document.head.append(s);
+  });
+  return _gisPromise;
+}
+/* IDトークンから表示用のプロフィールを取り出す。
+   ※ここでは表示のために読むだけ。署名の検証はサーバー側で行う必要があります。 */
+function decodeJWT(token){
+  const b64=token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");
+  const bytes=Uint8Array.from(atob(b64),ch=>ch.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+function renderGoogleButton(container,onProfile,onError){
+  loadGIS().then(()=>{
+    google.accounts.id.initialize({
+      client_id:APP_CONFIG.googleClientId,
+      callback:res=>{
+        try{ onProfile(decodeJWT(res.credential)) }
+        catch(e){ onError(e) }
+      },
+    });
+    google.accounts.id.renderButton(container,
+      {theme:"outline",size:"large",shape:"pill",text:"continue_with",locale:"ja",width:260});
+  }).catch(onError);
+}
+
+/* ---------------- Stripe（プレミアム会員の決済） ----------------
+   静的サイトから安全に扱えるのは「Payment Link」（公開URL）だけです。
+   決済完了後の戻り先URLに ?checkout=success を付けておくと、戻ったときに会員種別へ反映します。 */
+function stripeCheckoutUrl(){
+  if(!APP_CONFIG.stripePaymentLink)return "";
+  try{
+    const u=new URL(APP_CONFIG.stripePaymentLink);
+    const a=AUTH.account;
+    if(a){
+      if(a.sub)u.searchParams.set("client_reference_id",a.sub); // webhookで会員と突き合わせるため
+      if(a.email)u.searchParams.set("prefilled_email",a.email);
+    }
+    return u.toString();
+  }catch(e){ return APP_CONFIG.stripePaymentLink }
+}
+function consumeCheckoutReturn(){
+  const q=new URLSearchParams(location.search);
+  const r=q.get("checkout");
+  if(!r)return null;
+  history.replaceState(null,"",location.pathname+location.hash);
+  return r;
+}
+
 /* ---------------- ルーター ---------------- */
 const R={view:"home", tplId:null, chartId:null, tab:"basic", q:""};
 function go(patch){Object.assign(R,patch);render()}
@@ -618,6 +827,200 @@ function modal({title,desc,body,footer,wide}){
   $("#layer").innerHTML=""; $("#layer").append(m);
   setTimeout(()=>{const f=m.querySelector("input,select,button.btn-primary");f&&f.focus()},30);
   return m;
+}
+
+/* =====================================================================
+   画面 0 — ログイン
+   ===================================================================== */
+function viewLogin(){
+  let plan="free";                       // 選択中の会員種別
+  const gbtn=el("div",{class:"gbtn-slot"});
+  const notice=el("div",{class:"login-note"});
+
+  const planCard=(key,title,price,points)=>{
+    const card=el("button",{class:"plan"+(plan===key?" on":""),"data-plan":key,
+      onclick:()=>{plan=key;syncPlan();}},
+      el("div",{class:"plan-h"},
+        el("b",{text:title}),
+        el("span",{class:"plan-price",text:price})),
+      el("ul",{class:"plan-ul"},...points.map(p=>el("li",{text:p}))));
+    return card;
+  };
+  const freeCard=planCard("free","無料会員","0円",
+    ["Googleアカウントを選ぶだけ","座席表の作成・印刷","データはこの端末に保存"]);
+  const premCard=planCard("premium","プレミアム会員",APP_CONFIG.premiumPriceLabel,
+    ["無料会員のすべての機能","今後の追加機能を利用可能","開発の継続を応援できます"]);
+
+  function syncPlan(){
+    [freeCard,premCard].forEach(c=>c.classList.toggle("on",c.dataset.plan===plan));
+    notice.textContent = plan==="premium"
+      ? "Googleでログインしたあと、決済画面（Stripe）へ進みます。"
+      : "Googleアカウントを選ぶだけで始められます。";
+  }
+  syncPlan();
+
+  /* ログイン成立後の共通処理。プレミアムを選んでいれば決済へ案内する */
+  function afterSignIn(profile){
+    AUTH.signIn(profile,"free");        // 決済の確認が取れるまでは無料会員として開始する
+    if(plan==="premium"){ render(); dlgUpgrade({fromLogin:true}); }
+    else { toast("ログインしました"); render(); }
+  }
+
+  if(APP_CONFIG.googleClientId){
+    renderGoogleButton(gbtn,afterSignIn,err=>{
+      gbtn.innerHTML="";
+      gbtn.append(el("div",{class:"alert"},
+        el("h4",{text:"Googleログインを利用できません"}),
+        el("div",{text:String(err&&err.message||err)})));
+    });
+  }else{
+    // クライアントID未設定でも動作を確認できるようにする
+    gbtn.append(
+      el("button",{class:"btn btn-primary btn-lg",style:{width:"100%"},
+        onclick:()=>afterSignIn({sub:uid("trial"),name:"お試しユーザー",email:"",trial:true})},
+        "お試しログイン（設定なしで開始）"),
+      el("p",{class:"login-hint",html:
+        "Googleログインを有効にするには、<code>APP_CONFIG.googleClientId</code> にOAuthクライアントIDを設定してください。"}));
+  }
+
+  return el("div",{class:"login"},
+    el("div",{class:"login-card"},
+      el("div",{class:"login-brand"},el("span",{class:"mark"}),
+        el("div",{},el("b",{text:"自動座席表作成ツール"}),
+          el("div",{class:"login-sub",text:"条件を選ぶだけで座席表ができます"}))),
+      el("div",{class:"eyebrow",style:{marginBottom:"9px"},text:"会員種別を選んでください"}),
+      el("div",{class:"plans"},freeCard,premCard),
+      notice,
+      gbtn,
+      el("div",{class:"login-foot"},
+        APP_CONFIG.corporateContactUrl
+          ? el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約はこちら")
+          : el("button",{class:"link",onclick:dlgCorporate},"法人契約はこちら"))));
+}
+
+function dlgCorporate(){
+  modal({title:"法人契約について",
+    desc:"学校・自治体単位でのご利用をご検討の場合はこちらからご相談ください。",
+    body:el("div",{},
+      el("div",{class:"note",text:"学校単位・教育委員会単位でのお申し込み、請求書でのお支払い、名簿の一括登録などに対応します。"}),
+      el("ul",{style:{margin:"12px 0 0 18px",lineHeight:"1.8",fontSize:"13.5px"}},
+        el("li",{text:"ご利用人数・学校数に応じたお見積り"}),
+        el("li",{text:"請求書・見積書の発行"}),
+        el("li",{text:"導入時の設定サポート"})),
+      APP_CONFIG.supportEmail
+        ? el("p",{style:{marginTop:"14px",fontSize:"13.5px"}},"お問い合わせ先：",
+            el("a",{class:"link",href:"mailto:"+APP_CONFIG.supportEmail},APP_CONFIG.supportEmail))
+        : el("p",{class:"login-hint",style:{marginTop:"14px"},html:
+            "問い合わせ先は <code>APP_CONFIG.corporateContactUrl</code> または <code>APP_CONFIG.supportEmail</code> に設定してください。"})),
+    footer:[el("button",{class:"btn btn-primary",onclick:closeModal},"閉じる")]});
+}
+
+/* =====================================================================
+   設定メニュー・アカウント
+   ===================================================================== */
+function closeGear(){ document.querySelector(".gear-menu")?.remove() }
+function gearButton(){
+  const btn=el("button",{class:"gear",title:"設定","aria-label":"設定",onclick:e=>{
+    e.stopPropagation();
+    if(document.querySelector(".gear-menu"))return closeGear();
+    const menu=el("div",{class:"gear-menu",onclick:e2=>e2.stopPropagation()},
+      el("div",{class:"gear-who"},
+        el("div",{class:"gear-name",text:AUTH.displayName()}),
+        el("div",{class:"gear-plan"},
+          el("span",{class:"chip "+(AUTH.isPremium()?"chip-a":"chip-g"),
+            text:AUTH.isPremium()?"プレミアム会員":"無料会員"}))),
+      el("button",{class:"gear-item",onclick:()=>{closeGear();dlgAccount()}},"アカウント設定"),
+      el("button",{class:"gear-item",onclick:()=>{closeGear();dlgContact()}},"問い合わせ"),
+      el("button",{class:"gear-item danger",onclick:()=>{closeGear();dlgSignOut()}},"ログアウト"));
+    btn.parentElement.append(menu);
+  }},"⚙");
+  return el("div",{class:"gear-wrap"},btn);
+}
+document.addEventListener("click",()=>closeGear());
+
+function dlgAccount(){
+  const nameIn=el("input",{class:"input",value:AUTH.account?.name||"",placeholder:"例：佐々木 一郎"});
+  const planRow=AUTH.isPremium()
+    ? el("div",{class:"note"},el("b",{text:"プレミアム会員です。"}),
+        AUTH.account?.premiumSince?el("span",{text:`（${jpDate(AUTH.account.premiumSince)}から）`}):null)
+    : el("div",{},
+        el("div",{class:"note",style:{marginBottom:"10px"},
+          text:`プレミアム会員（${APP_CONFIG.premiumPriceLabel}）に変更すると、今後の追加機能をご利用いただけます。`}),
+        el("button",{class:"btn btn-primary",onclick:()=>{closeModal();dlgUpgrade({})}},"プレミアム会員に変更する"));
+
+  modal({title:"アカウント設定",
+    desc:AUTH.account?.email||"",
+    body:el("div",{},
+      el("label",{class:"field"},el("span",{text:"表示名"}),nameIn),
+      el("div",{class:"eyebrow",style:{margin:"18px 0 8px"},text:"会員種別"}),
+      planRow,
+      AUTH.isPremium()
+        ? el("button",{class:"btn btn-sm",style:{marginTop:"12px"},onclick:()=>{
+            AUTH.setPlan("free");closeModal();render();toast("無料会員に戻しました");
+          }},"無料会員に戻す")
+        : null),
+    footer:[
+      el("button",{class:"btn",onclick:closeModal},"閉じる"),
+      el("button",{class:"btn btn-primary",onclick:()=>{
+        AUTH.rename(nameIn.value);closeModal();render();toast("保存しました");
+      }},"名称を保存")]});
+}
+
+function dlgUpgrade({fromLogin}){
+  const url=stripeCheckoutUrl();
+  const body=el("div",{},
+    el("div",{class:"note"},
+      el("b",{text:`プレミアム会員：${APP_CONFIG.premiumPriceLabel}`}),
+      el("div",{style:{marginTop:"5px"},text:"お支払いはStripeの安全な決済ページで行われます。カード情報がこのツールに保存されることはありません。"})),
+    fromLogin?el("p",{style:{marginTop:"12px",fontSize:"13.5px",color:"var(--ink2)"},
+      text:"いま無料会員としてログインしています。決済が完了するとプレミアム会員に切り替わります。"}):null);
+  const footer=[el("button",{class:"btn",onclick:closeModal},"あとで")];
+  if(url){
+    footer.push(el("a",{class:"btn btn-primary",href:url},"決済ページへ進む"));
+  }else{
+    body.append(el("div",{class:"alert",style:{marginTop:"14px"}},
+      el("h4",{text:"決済リンクが未設定です"}),
+      el("div",{html:"Stripeで作成したPayment LinkのURLを <code>APP_CONFIG.stripePaymentLink</code> に設定してください。"})));
+    // 設定前でもプレミアム画面の見え方を確認できるようにする（決済は行われません）
+    footer.push(el("button",{class:"btn",onclick:()=>{
+      AUTH.setPlan("premium");closeModal();render();toast("プレミアム会員として設定しました（動作確認用）");
+    }},"確認用に切り替える"));
+  }
+  modal({title:"プレミアム会員へのお申し込み",body,footer});
+}
+
+function dlgContact(){
+  const mail=APP_CONFIG.supportEmail;
+  modal({title:"問い合わせ",
+    desc:"ご質問・不具合のご報告・機能のご要望をお寄せください。",
+    body:el("div",{},
+      mail
+        ? el("div",{class:"note"},"メール：",
+            el("a",{class:"link",href:"mailto:"+mail+"?subject="+encodeURIComponent("【座席表ツール】お問い合わせ")},mail))
+        : el("div",{class:"alert"},el("h4",{text:"問い合わせ先が未設定です"}),
+            el("div",{html:"<code>APP_CONFIG.supportEmail</code> に連絡先を設定してください。"})),
+      el("p",{style:{marginTop:"14px",fontSize:"13px",color:"var(--ink2)"},
+        text:"不具合のご報告の際は、ご利用の端末（パソコン／タブレット／スマートフォン）とブラウザ名をあわせてお知らせいただけると助かります。"}),
+      APP_CONFIG.corporateContactUrl||true
+        ? el("p",{style:{marginTop:"10px",fontSize:"13.5px"}},
+            APP_CONFIG.corporateContactUrl
+              ? el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約のご相談はこちら")
+              : el("button",{class:"link",onclick:()=>{closeModal();dlgCorporate()}},"法人契約のご相談はこちら"))
+        : null),
+    footer:[el("button",{class:"btn btn-primary",onclick:closeModal},"閉じる")]});
+}
+
+function dlgSignOut(){
+  modal({title:"ログアウトしますか？",
+    desc:"作成した座席表はこの端末に残ります。",
+    body:el("div",{class:"note",text:"次回また同じGoogleアカウントでログインすると、そのまま続けてご利用いただけます。"}),
+    footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
+      el("button",{class:"btn btn-danger",onclick:()=>{
+        AUTH.signOut();closeModal();
+        if(window.google?.accounts?.id)try{google.accounts.id.disableAutoSelect()}catch(e){}
+        R.view="home";R.tplId=null;R.chartId=null;
+        render();toast("ログアウトしました");
+      }},"ログアウト")]});
 }
 
 /* =====================================================================
@@ -1583,6 +1986,20 @@ function placeStudent(p,seat,t,c){
   }
 }
 
+/* 固定席は「テンプレートの既定（t.fixedSeats）」と「その座席表のスナップショット（c.fixedSeats）」の
+   2か所で保持している。編集画面で固定・解除したときに両方へ反映しないと、
+   「固定席・NGペア」タブの座席ピッカーに現れず食い違うため、ここで必ず同期する。 */
+function setSeatFixed(t,c,seatId,no,fixed){
+  // 同じ席・同じ生徒の重複登録を防ぐため、いったん両方から取り除いてから入れ直す
+  const drop=arr=>(arr||[]).filter(f=>f.seatId!==seatId&&f.no!==no);
+  c.fixedSeats=drop(c.fixedSeats);
+  t.fixedSeats=drop(t.fixedSeats);
+  if(fixed){
+    c.fixedSeats.push({no,seatId});
+    t.fixedSeats.push({no,seatId});
+  }
+}
+
 function dlgSeatMenu(s,st,t,c){
   const isFixed=(c.fixedSeats||[]).some(f=>f.seatId===s.id);
   modal({title:st.name,desc:`前から${s.row+1}列目・${s.col+1}番`,
@@ -1593,12 +2010,12 @@ function dlgSeatMenu(s,st,t,c){
       el("button",{class:"btn",onclick:closeModal},"閉じる"),
       el("button",{class:"btn",onclick:()=>{
         pushUndo("固定設定の変更");
-        c.fixedSeats=isFixed?c.fixedSeats.filter(f=>f.seatId!==s.id):[...c.fixedSeats,{no:st.no,seatId:s.id}];
+        setSeatFixed(t,c,s.id,st.no,!isFixed);
         store.save(t);closeModal();renderEditorBody();toast(isFixed?"固定を解除しました":"この席を固定しました");
       }},isFixed?"固定を解除":"この席を固定する"),
       el("button",{class:"btn btn-danger",onclick:()=>{
         pushUndo("座席から外す");delete c.assign[s.id];
-        c.fixedSeats=c.fixedSeats.filter(f=>f.seatId!==s.id);
+        setSeatFixed(t,c,s.id,st.no,false);
         store.save(t);closeModal();renderEditorBody();toast("名前カード一覧へ戻しました");
       }},"席から外す")]});
 }
@@ -1889,6 +2306,15 @@ function render(){
   const keepScroll=key===_renderKey;
   _renderKey=key;
 
+  // 未ログインならログイン画面だけを表示する
+  if(!AUTH.signedIn()){
+    _renderKey=null;
+    app.innerHTML="";
+    app.append(el("div",{class:"view",id:"view"}));
+    $("#view").append(viewLogin());
+    return;
+  }
+
   const t=R.tplId?store.get(R.tplId):null;
   const c=t&&R.chartId?t.charts.find(x=>x.id===R.chartId):null;
 
@@ -1905,7 +2331,8 @@ function render(){
       el("div",{class:"brand"},el("span",{class:"mark"}),"自動座席表作成ツール"),
       el("div",{class:"div",style:{width:"1px",height:"24px",background:"var(--line)"}}),
       crumb, el("div",{class:"spacer"}),
-      el("span",{class:"eyebrow",text:"Prototype"})),
+      AUTH.isPremium()?el("span",{class:"chip chip-a",text:"プレミアム"}):null,
+      gearButton()),
     el("div",{class:"view",id:"view"}));
 
   const v=$("#view");
@@ -1936,6 +2363,18 @@ document.addEventListener("keydown",e=>{
 });
 
 /* ---- 起動 ---- */
+AUTH.load();
+(function handleCheckoutReturn(){
+  const r=consumeCheckoutReturn();
+  if(!r)return;
+  if(r==="success"&&AUTH.signedIn()){
+    // 決済ページから戻ってきた合図。確実な判定にはサーバー側でのwebhook照会が必要（AUTH.refreshPlanFromServer）
+    AUTH.setPlan("premium");
+    setTimeout(()=>toast("プレミアム会員になりました。ありがとうございます"),300);
+  }else if(r==="cancel"){
+    setTimeout(()=>toast("決済を中止しました"),300);
+  }
+})();
 store.load().then(render);
 </script>
 </body>
