@@ -13,17 +13,21 @@
 ## 1. Google Cloud（ログインとドライブ保存）
 
 1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成
-2. **APIとサービス → ライブラリ** → `Google Drive API` を有効化
-3. **APIとサービス → OAuth同意画面**
-   - ユーザーの種類：外部
-   - アプリ名／サポートメール／デベロッパー連絡先を入力
-   - スコープに以下を追加
-     - `.../auth/userinfo.email`
-     - `.../auth/userinfo.profile`
-     - `.../auth/drive.appdata`
-   - 「テスト」の間は登録したテストユーザーしかログインできません。一般公開する際は**「本番環境に公開」**を実行します
+2. **APIとサービス → ライブラリ** → `Google Drive API` を有効化（先にこれを済ませないと、次の手順でスコープの選択肢に出てきません）
+3. **APIとサービス → OAuth同意画面 → データアクセス**（「スコープ」というタブ名の場合もあります）
+   - **「スコープを追加または削除」**を開く
+   - 検索欄に `drive.appdata` と入力しても一覧に出てこないことがあります。
+     その場合は一覧の下にある**「手動でスコープを追加」**の入力欄に、以下を1行ずつそのまま貼り付けて追加してください
+     ```
+     https://www.googleapis.com/auth/userinfo.email
+     https://www.googleapis.com/auth/userinfo.profile
+     https://www.googleapis.com/auth/drive.appdata
+     ```
+   - 「更新」→「保存して次へ」で確定
+   - アプリ名／サポートメール／デベロッパー連絡先は「OAuth同意画面 → 基本情報」で入力
+   - 「公開ステータス：テスト」の間は登録したテストユーザーしかログインできません。一般公開する際は**「本番環境に公開」**を実行します
      （`drive.appdata` は機微スコープではないため、通常はGoogleの審査なしで公開できます）
-4. **認証情報 → OAuth 2.0 クライアントID（ウェブアプリケーション）** を作成
+4. **APIとサービス → 認証情報 → OAuth 2.0 クライアントID（ウェブアプリケーション）** を作成
    - 承認済みのリダイレクトURI： `https://<プロジェクトID>.supabase.co/auth/v1/callback`
    - 承認済みのJavaScript生成元： `https://kinomin.github.io`
    - 発行された**クライアントID**と**クライアントシークレット**を控える
