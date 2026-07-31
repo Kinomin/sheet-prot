@@ -475,12 +475,12 @@ table.tbl tr:hover td{background:#f8fafd}
 /* =====================================================================
    自動座席表作成ツール（β版） single-file / no build / 依存ライブラリなし
    ---------------------------------------------------------------------
-   ブラウザだけで動作し、名簿・座席表データは端末のIndexedDBに保存する。
+   ブラウザだけで動作し、名簿・座席表データは端末のIndexedDBと
+   利用者本人のGoogleドライブ（プレミアム会員は端末間で同期）に保存する。
    データはアカウント（Googleアカウントのsub）ごとに分離して保存する。
 
-   サーバーが必要になるのは次の2点のみ（いずれも未実装・下記に差し替え地点あり）:
-     - Googleログインの署名検証        … decodeJWT() は表示用に読むだけ
-     - Stripeの購読状態の確認          … AUTH.refreshPlanFromServer()
+   認証・会員種別・決済はSupabase（Auth / profiles / Edge Functions）と
+   Stripeが担う。詳しい設定手順は DEPLOY.md を参照。
    ===================================================================== */
 
 /* =====================================================================
@@ -494,21 +494,21 @@ const APP_CONFIG={
   // Supabase → Project Settings → API
   // URL と anon キーはブラウザに置く前提の公開値なので、コミットして問題ありません
   // （データは行レベルセキュリティ(RLS)で守ります）。
-  supabaseUrl:"",
-  supabaseAnonKey:"",
+  supabaseUrl:"https://ytgjvpnsslcxnjtmgukk.supabase.co",
+  supabaseAnonKey:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl0Z2p2cG5zc2xjeG5qdG1ndWtrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0OTgzMjQsImV4cCI6MjEwMTA3NDMyNH0._z1QaELD5jN_RaupcgUBegXYW0uj7R-sUVj1T9uwBV4",
 
   // Google Cloud Console →「APIとサービス」→「認証情報」→ OAuth 2.0 クライアントID（ウェブ）
   // ・Supabaseの Authentication → Providers → Google に設定するものと同じIDを入れる
   //   （同じIDにすることで、ドライブ利用の同意を1回で済ませられます）
   // ・「ライブラリ」で Google Drive API を有効化
   // ・OAuth同意画面のスコープに .../auth/drive.appdata を追加
-  googleClientId:"",
+  googleClientId:"189688689872-od7in4bdj6rngnpd7vjo48leu2b1ahc4.apps.googleusercontent.com",
 
   // 法人契約の問い合わせ先（お問い合わせフォームのURLなど）
   corporateContactUrl:"",
 
   // 問い合わせ先メールアドレス
-  supportEmail:"",
+  supportEmail:"kenjunioriron@gmail.com",
 
   premiumPriceLabel:"500円 / 年",
 
