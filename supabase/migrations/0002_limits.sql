@@ -42,8 +42,17 @@ begin
 
   -- 同時に複数タブから押された場合も二重に消費しないよう行ロックを取る
   select * into me from public.profiles where id = auth.uid() for update;
+
+  -- 会員情報がまだ無い場合（サインアップ時のトリガーが動かなかった等）は、
+  -- ここで作ってから続ける。無いことを理由に印刷を止めると
+  -- 「使い切りました」と誤って表示されてしまうため。
   if not found then
-    return json_build_object('allowed', false, 'reason', 'no_profile');
+    insert into public.profiles (id) values (auth.uid())
+    on conflict (id) do nothing;
+    select * into me from public.profiles where id = auth.uid() for update;
+    if not found then
+      return json_build_object('allowed', false, 'reason', 'no_profile');
+    end if;
   end if;
 
   if me.plan = 'premium' then

@@ -127,6 +127,27 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
 .tcard-new .plus{font-size:26px;line-height:1;font-weight:400}
 
 .empty{text-align:center;padding:60px 20px;color:var(--ink2)}
+/* 1件もないときの案内 */
+.firstrun{
+  border:2px dashed var(--line);border-radius:16px;background:var(--card);
+  padding:36px 30px;text-align:center;max-width:620px;margin:0 auto;
+}
+.firstrun h3{font-size:19px;font-weight:800;margin-bottom:9px}
+.firstrun > p{color:var(--ink2);font-size:14px;line-height:1.8;margin-bottom:20px}
+.firstrun-steps{
+  list-style:none;counter-reset:s;text-align:left;max-width:430px;margin:0 auto 24px;
+  display:flex;flex-direction:column;gap:11px;
+}
+.firstrun-steps li{
+  counter-increment:s;position:relative;padding-left:34px;
+  font-size:13.5px;color:var(--ink2);line-height:1.6;
+}
+.firstrun-steps li::before{
+  content:counter(s);position:absolute;left:0;top:-1px;
+  width:23px;height:23px;border-radius:50%;background:var(--indigo);color:#fff;
+  font-family:var(--mono);font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;
+}
 .empty h3{font-size:17px;margin-bottom:6px;color:var(--ink)}
 
 /* ---------- テンプレート詳細 ---------- */
@@ -496,7 +517,7 @@ const APP_CONFIG={
   privacyUrl:"./privacy.html",
 };
 
-/* Supabaseへの接続が設定済みか。未設定なら「お試しログイン」で端末内だけで動く */
+/* Supabaseへの接続が設定済みか。ログインはすべてGoogle認証を経由する */
 const SB_READY=()=>!!(APP_CONFIG.supabaseUrl&&APP_CONFIG.supabaseAnonKey);
 
 /* ---------------- ユーティリティ ---------------- */
@@ -675,7 +696,7 @@ const store={
     const owner=currentOwnerId();
     this.data.templates=[];
     if(!owner)return;                                   // 未ログイン時は何も読み込まない
-    if(typeof indexedDB==="undefined"){ this.seedFor(owner); return }
+    if(typeof indexedDB==="undefined")return;
     try{
       const all=await idbGetAll();
       // ownerId導入前に作られたデータは、この端末の利用者のものとして引き継ぐ
@@ -684,65 +705,12 @@ const store={
         legacy.forEach(t=>{t.ownerId=owner});
         await Promise.all(legacy.map(t=>idbPut(t)));
       }
-      const mine=all.filter(t=>t.ownerId===owner);
-      if(mine.length){
-        this.data.templates=mine.sort((a,b)=>b.createdAt-a.createdAt);
-      }else if(!AUTH.account?.seeded){
-        // 初回ログイン時だけ見本データを用意する。
-        // （利用者が自分で全部消したあとに勝手に復活しないよう、アカウント側へ印を残す）
-        this.seedFor(owner);
-        await Promise.all(this.data.templates.map(t=>idbPut(t)));
-      }
-      AUTH.markSeeded();
-    }catch(err){ this.seedFor(owner) }
-  },
-  seedFor(owner){
-    seed();
-    this.data.templates.forEach(t=>{t.ownerId=owner});
+      this.data.templates=all
+        .filter(t=>t.ownerId===owner)
+        .sort((a,b)=>b.createdAt-a.createdAt);
+    }catch(err){ /* 読み込めない場合は空のまま開始する */ }
   }
 };
-
-/* ---------------- サンプルデータ ---------------- */
-const NAMES=[
- ["相川 悠真","あいかわゆうま","m"],["石田 芽依","いしだめい","f"],["伊藤 陽翔","いとうはると","m"],
- ["上原 咲希","うえはらさき","f"],["遠藤 蓮","えんどうれん","m"],["大野 結愛","おおのゆあ","f"],
- ["岡田 湊","おかだみなと","m"],["加藤 凛","かとうりん","f"],["川口 大翔","かわぐちひろと","m"],
- ["木村 陽菜","きむらひな","f"],["工藤 樹","くどういつき","m"],["小林 紬","こばやしつむぎ","f"],
- ["斉藤 悠斗","さいとうゆうと","m"],["坂本 莉子","さかもとりこ","f"],["佐藤 陸","さとうりく","m"],
- ["島田 葵","しまだあおい","f"],["鈴木 颯太","すずきそうた","m"],["高橋 心春","たかはしこはる","f"],
- ["田中 蒼","たなかそう","m"],["中村 结衣","なかむらゆい","f"],["西村 朝陽","にしむらあさひ","m"],
- ["野口 澪","のぐちみお","f"],["橋本 律","はしもとりつ","m"],["林 詩織","はやししおり","f"],
- ["原田 新","はらだあらた","m"],["平野 杏","ひらのあん","f"],["福田 碧","ふくだあおい","m"],
- ["藤井 花","ふじいはな","f"],["星野 悠","ほしのゆう","m"],["前田 楓","まえだかえで","f"],
- ["松本 直樹","まつもとなおき","m"],["三浦 芽生","みうらめい","f"],["宮本 拓海","みやもとたくみ","m"],
- ["森田 結菜","もりたゆいな","f"],["山田 太郎","やまだたろう","m"]
-];
-function roster(n,offset=0){
-  return NAMES.slice(offset,offset+n).map((x,i)=>({
-    no:i+1,name:x[0],kana:x[1],romaji:toRomaji(x[1]),gender:x[2]
-  }));
-}
-function seed(){
-  const t1=newTemplate({kind:"homeroom",className:"1年1組",teacherName:"佐々木 一郎",cols:6,rows:6,roster:roster(35)});
-  // 6×6=36席のうち1席を削除して35名にぴったり合わせる
-  t1.layout.seats.find(s=>s.id==="s_5_5").enabled=false;
-  t1.fixedSeats=[{no:18,seatId:"s_1_2"}];   // 高橋さんを前から2列目・3番へ固定
-  t1.ngPairs=[[19,17]];                     // 田中 － 鈴木
-  const c1=newChart(t1,"2026-04-10");
-  const ss=c1.layout.seats.filter(s=>s.enabled);
-  t1.roster.forEach((st,i)=>{ if(ss[i]) c1.assign[ss[i].id]=st.no; });
-  c1.createdAt=new Date("2026-04-10T08:12:00").getTime(); c1.updatedAt=c1.createdAt;
-  const c2=newChart(t1,"2026-05-20"); c2.assign=clone(c1.assign);
-  c2.createdAt=new Date("2026-05-19T17:40:00").getTime(); c2.updatedAt=c2.createdAt;
-  t1.charts=[c2,c1];
-
-  const t2=newTemplate({kind:"homeroom",className:"1年2組",teacherName:"井上 美咲",cols:6,rows:6,roster:roster(33,2)});
-  const t3=newTemplate({kind:"elective",subjectName:"数学Ⅱ（選択）",teacherName:"渡辺 健",cols:5,rows:5,roster:roster(22,5)});
-  const t4=newTemplate({kind:"elective",subjectName:"英語少人数",teacherName:"Green, S.",cols:4,rows:4,roster:roster(16,10)});
-  const t5=newTemplate({kind:"elective",subjectName:"理科実験",teacherName:"大塚 里奈",cols:4,rows:5,roster:roster(20,3)});
-  t5.print.orient="portrait";
-  store.data.templates=[t1,t2,t3,t4,t5];
-}
 
 /* ---------------- 表示ルール ---------------- */
 /* 座席表は「開始日の新しい順」で扱う。配列は作成順に積まれるため、
@@ -785,20 +753,37 @@ const SB={
             Authorization:"Bearer "+(this.session?.access_token||APP_CONFIG.supabaseAnonKey),
             "Content-Type":"application/json",...extra};
   },
+  /* ログイン後の戻り先。Supabaseの許可リストと突き合わせるため、
+     末尾の index.html を落としてディレクトリ形に揃える
+     （/sheet-prot/index.html のまま送ると許可リストと一致せず弾かれる）。 */
+  redirectUrl(){
+    return location.origin+location.pathname.replace(/index\.html$/,"");
+  },
   /* Googleログインの画面へ送る。ドライブのアプリ専用領域も同時に許可してもらう */
   signInWithGoogle(){
-    const redirect=location.origin+location.pathname;
     const params=new URLSearchParams({
       provider:"google",
-      redirect_to:redirect,
+      redirect_to:this.redirectUrl(),
       scopes:DRIVE_SCOPE,
     });
     location.href=`${APP_CONFIG.supabaseUrl}/auth/v1/authorize?${params}`;
   },
-  /* ログイン後に戻ってきたURL（#access_token=...）からセッションを取り込む */
+  /* ログイン後に戻ってきたURL（#access_token=... または #error=...）を処理する。
+     戻り値： "ok" | "error" | false（何も無かった） */
   captureRedirect(){
     if(!location.hash||location.hash.length<2)return false;
     const p=new URLSearchParams(location.hash.slice(1));
+
+    // 同意しなかった場合などはエラーが返る。黙って握りつぶさず利用者に伝える
+    const err=p.get("error")||p.get("error_code");
+    if(err){
+      this.lastError=p.get("error_description")
+        ? decodeURIComponent(p.get("error_description")).replace(/\+/g," ")
+        : err;
+      history.replaceState(null,"",location.pathname+location.search);
+      return "error";
+    }
+
     const access=p.get("access_token");
     if(!access)return false;
     this.saveSession({
@@ -806,10 +791,12 @@ const SB={
       refresh_token:p.get("refresh_token")||"",
       expires_at:Date.now()+(Number(p.get("expires_in"))||3600)*1000,
       provider_token:p.get("provider_token")||"",
+      // Googleのアクセストークンは約1時間で失効する
+      provider_token_expires_at:p.get("provider_token")?Date.now()+3600*1000:0,
       user:null,
     });
     history.replaceState(null,"",location.pathname+location.search);
-    return true;
+    return "ok";
   },
   expired(){ return !this.session||Date.now()>(this.session.expires_at||0)-60000 },
   /* 期限が近ければ更新する */
@@ -829,7 +816,9 @@ const SB={
         access_token:d.access_token,
         refresh_token:d.refresh_token||this.session.refresh_token,
         expires_at:Date.now()+(Number(d.expires_in)||3600)*1000,
-        provider_token:this.session.provider_token||"",   // Googleの権限は別管理
+        // Googleの権限はSupabaseのセッションとは別に期限を持つ
+        provider_token:this.session.provider_token||"",
+        provider_token_expires_at:this.session.provider_token_expires_at||0,
         user:d.user||this.session.user,
       });
       return true;
@@ -912,12 +901,6 @@ const AUTH={
   signedIn(){ return !!this.account },
   isPremium(){ return this.account?.plan==="premium" },
   displayName(){ return (this.account?.name||this.account?.email||"ゲスト") },
-  /* お試しログイン（Supabase未設定時に、この端末だけで動かすための入口） */
-  signInTrial(){
-    this.account={sub:uid("trial"),email:"",name:"お試しユーザー",picture:"",
-                  plan:"free",trial:true,updatedAt:Date.now()};
-    this.persist(); return this.account;
-  },
   /* Supabaseのユーザーとprofilesから、画面用のアカウント情報を作る */
   applyServer(user,profile){
     this.account={
@@ -929,11 +912,8 @@ const AUTH={
       periodEnd:profile?.current_period_end||"",
       cancelAtPeriodEnd:!!profile?.cancel_at_period_end,
       printCount:Number(profile?.print_count||0),
-      trial:false,
-      seeded:this.account?.seeded&&this.account?.sub===user.id?true:this.account?.seeded,
       updatedAt:Date.now(),
     };
-    // 別アカウントに切り替わったら見本投入の印は引き継がない
     this.persist(); return this.account;
   },
   rename(name){
@@ -941,18 +921,12 @@ const AUTH={
     this.account.name=(name||"").trim();
     this.account.updatedAt=Date.now();
     this.persist();
-    if(!this.account.trial)SB.updateDisplayName(this.account.name).catch(()=>{});
+    SB.updateDisplayName(this.account.name).catch(()=>{});
   },
   signOut(){ this.account=null; this.persist(); },
-  /* 見本データを投入済みかどうかの印。利用者が全テンプレートを削除したあと、
-     再読込で見本が勝手に復活しないようにするために使う。 */
-  markSeeded(){
-    if(!this.account||this.account.seeded)return;
-    this.account.seeded=true; this.persist();
-  },
   /* サーバーの会員種別を取り込み直す（決済の直後などに呼ぶ） */
   async refreshPlanFromServer(){
-    if(!this.account||this.account.trial||!SB_READY())return this.account?.plan||null;
+    if(!this.account||!SB_READY())return this.account?.plan||null;
     const user=await SB.getUser(); if(!user)return null;
     const profile=await SB.fetchProfile();
     this.applyServer(user,profile);
@@ -1011,10 +985,14 @@ const CLOUD={
      （ページを再読込した直後など、すでに同意済みのケースを想定） */
   async getToken(interactive){
     if(this.hasToken())return this.token;
-    // ログイン直後はSupabaseがGoogleのアクセストークンを渡してくれるので、それを使う
-    if(SB.session?.provider_token){
-      this.token=SB.session.provider_token;
-      this.tokenExpiresAt=Date.now()+55*60*1000;
+    // ログイン直後はSupabaseがGoogleのアクセストークンを渡してくれるので、それを使う。
+    // ただしGoogleのトークンは約1時間で失効するため、取得時刻から期限を判断する
+    // （期限切れのまま使い続けると、以降ずっと同期できなくなる）。
+    const pt=SB.session?.provider_token;
+    const ptExp=SB.session?.provider_token_expires_at||0;
+    if(pt&&Date.now()<ptExp-60000){
+      this.token=pt;
+      this.tokenExpiresAt=ptExp;
       return this.token;
     }
     if(!this.configured())throw new Error("GoogleクライアントIDが未設定です");
@@ -1030,19 +1008,38 @@ const CLOUD={
             resolve(this.token);
           }else reject(new Error(res?.error_description||res?.error||"アクセス権を取得できませんでした"));
         },
-        error_callback:err=>reject(new Error(err?.type==="popup_closed"
-          ?"ログインの画面が閉じられました":(err?.message||"ログインできませんでした"))),
+        error_callback:err=>{
+          // 自動同期のような「利用者の操作を伴わない」場面では、
+          // ブラウザがポップアップを塞ぐ。手動操作なら通るので、その旨を伝える。
+          const e=new Error(
+            err?.type==="popup_failed_to_open" ? "ブラウザにポップアップを塞がれました"
+            : err?.type==="popup_closed"       ? "Googleの画面が閉じられました"
+            : (err?.message||"Googleの利用許可を取得できませんでした"));
+          e.needsUserAction=(err?.type==="popup_failed_to_open"||err?.type==="popup_closed");
+          reject(e);
+        },
       });
       this.client.requestAccessToken(interactive?{}:{prompt:""});
     });
   },
-  clearToken(){ this.token=null; this.tokenExpiresAt=0 },
+  /* 使えなくなったトークンを捨てる。ログイン時にもらったGoogleトークンも一緒に捨てないと、
+     再試行でも同じ失効トークンを使い続けてしまい、取り直しに進めない。 */
+  clearToken(){
+    this.token=null; this.tokenExpiresAt=0;
+    if(SB.session?.provider_token){
+      SB.saveSession({...SB.session,provider_token:"",provider_token_expires_at:0});
+    }
+  },
 
-  /* Drive APIの呼び出し。トークン切れ(401)は1度だけ静かに取り直して再試行する */
+  /* Drive APIの呼び出し。トークン切れ(401/403)は1度だけ取り直して再試行する */
   async api(url,opts={},retry=true){
-    const token=await this.getToken(false).catch(e=>{ if(retry)throw e; return null });
+    const token=await this.getToken(false);
+    if(!token)throw new Error("Googleドライブの利用許可を取得できませんでした");
     const res=await fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:"Bearer "+token}});
-    if(res.status===401&&retry){ this.clearToken(); return this.api(url,opts,false) }
+    if((res.status===401||res.status===403)&&retry){
+      this.clearToken();
+      return this.api(url,opts,false);
+    }
     if(!res.ok)throw new Error(`Drive APIエラー (${res.status})`);
     return res;
   },
@@ -1073,12 +1070,14 @@ const CLOUD={
 };
 
 /* ---- 同期の中身 ---- */
-const TOMB_KEY="seat-chart-deleted";
+/* 削除記録はアカウントごとに分ける。共用パソコンで1つにまとめてしまうと、
+   別の先生の削除記録が自分のドライブへ書き出されてしまう。 */
+const tombKey=()=>"seat-chart-deleted:"+(currentOwnerId()||"anon");
 function loadTombstones(){
-  try{ return JSON.parse(localStorage.getItem(TOMB_KEY)||"{}") }catch(e){ return {} }
+  try{ return JSON.parse(localStorage.getItem(tombKey())||"{}") }catch(e){ return {} }
 }
 function saveTombstones(t){
-  try{ localStorage.setItem(TOMB_KEY,JSON.stringify(t)) }catch(e){}
+  try{ localStorage.setItem(tombKey(),JSON.stringify(t)) }catch(e){}
 }
 /* テンプレートを削除したことを記録する（他の端末へ「消した」と伝えるため） */
 function markDeleted(id){
@@ -1114,16 +1113,19 @@ function mergeTemplates(local,remote,tomb){
 }
 
 const SYNC={
-  state:"off",          // off | idle | syncing | ok | error
+  state:"off",          // off | idle | syncing | ok | error | needsAction
   lastAt:0, lastError:"", timer:null,
   /* 端末間の引き継ぎはプレミアム会員の機能 */
   available(){
-    return CLOUD.configured()&&AUTH.signedIn()&&!AUTH.account?.trial&&AUTH.isPremium();
+    return CLOUD.configured()&&AUTH.signedIn()&&AUTH.isPremium();
   },
   label(){
     if(AUTH.signedIn()&&!AUTH.isPremium())return "この端末のみに保存（無料会員）";
     if(!this.available())return "この端末のみに保存";
     if(this.state==="syncing")return "同期中…";
+    // 自動同期中はブラウザがGoogleの確認画面を開けないことがある。
+    // その場合は「今すぐ同期」を押してもらえば通る。
+    if(this.state==="needsAction")return "「今すぐ同期」を押してください";
     if(this.state==="error")return "同期できませんでした";
     if(this.state==="ok"&&this.lastAt)return "同期済み "+jpDT(this.lastAt);
     return "未同期";
@@ -1134,11 +1136,15 @@ const SYNC={
     clearTimeout(this.timer);
     this.timer=setTimeout(()=>this.run({quiet:true}),2500);
   },
-  async run({quiet}={}){
+  /* quiet:true … 自動実行（画面を邪魔しない）
+     interactive:true … 利用者がボタンを押した場合。必要ならGoogleの確認画面を開いてよい */
+  async run({quiet,interactive}={}){
     if(!this.available()){ this.state="off"; return false }
     if(this.state==="syncing")return false;
     this.state="syncing"; if(!quiet)refreshSyncUI();
     try{
+      // 押された直後なら、失効していても確認画面を開いて取り直せる
+      if(interactive&&!CLOUD.hasToken())await CLOUD.getToken(true);
       const owner=currentOwnerId();
       const files=await CLOUD.listFiles();
       const tombFile=files.find(f=>f.name===TOMB_FILE)||null;
@@ -1173,8 +1179,10 @@ const SYNC={
       saveTombstones(tomb);
 
       // 反映：この端末へ（自分のデータとして取り込む）
+      // 取り込んだものは必ず今のアカウントの持ち物にする。
+      // 別のIDのまま保存すると、次回の読み込みで自分のデータとして拾えず消えたように見える。
       const list=merged.map(m=>m.tpl).filter(t=>t&&t.id);
-      list.forEach(t=>{ if(!t.ownerId)t.ownerId=owner });
+      list.forEach(t=>{ t.ownerId=owner });
       Object.keys(tomb).forEach(id=>{ idbDelete(id).catch(()=>{}) });
       await Promise.all(list.map(t=>idbPut(t)));
       store.data.templates=list.sort((a,b)=>b.createdAt-a.createdAt);
@@ -1182,7 +1190,9 @@ const SYNC={
       this.state="ok"; this.lastAt=Date.now(); this.lastError="";
       return true;
     }catch(err){
-      this.state="error"; this.lastError=String(err&&err.message||err);
+      // ポップアップを塞がれた場合は失敗ではなく「操作待ち」として扱う
+      this.state=err&&err.needsUserAction?"needsAction":"error";
+      this.lastError=String(err&&err.message||err);
       return false;
     }finally{
       refreshSyncUI();
@@ -1273,7 +1283,7 @@ function viewLogin(){
   const freeCard=planCard("free","無料会員","0円",
     ["座席表の作成・編集は無制限","印刷は3回まで","保存はこの端末のみ"]);
   const premCard=planCard("premium","プレミアム会員",APP_CONFIG.premiumPriceLabel,
-    ["印刷は無制限","端末をまたいでデータを引き継ぎ","今後の追加機能を利用可能"]);
+    ["印刷は無制限","端末をまたいでデータを引き継ぎ"]);
 
   function syncPlan(){
     LOGIN_INTENT=plan;
@@ -1290,16 +1300,11 @@ function viewLogin(){
       el("p",{class:"login-hint",
         text:"ログイン時に、端末をまたいでデータを引き継ぐための保存領域（Googleドライブのアプリ専用領域）の利用を確認します。ドライブ内のほかのファイルは読み書きしません。"}));
   }else{
-    // 未設定でも動作を確認できるようにする
-    gbtn.append(
-      el("button",{class:"btn btn-primary btn-lg",style:{width:"100%"},
-        onclick:()=>{
-          AUTH.signInTrial();
-          reloadForAccount().then(()=>toast("お試しモードで開始しました（この端末のみに保存）"));
-        }},
-        "お試しログイン（設定なしで開始）"),
-      el("p",{class:"login-hint",html:
-        "Googleログインと端末間の引き継ぎを有効にするには、<code>APP_CONFIG.supabaseUrl</code> と <code>supabaseAnonKey</code> を設定してください。お試しモードではこの端末のみに保存されます。"}));
+    // 接続先が未設定のときは、動く状態ではないことをはっきり伝える
+    gbtn.append(el("div",{class:"alert"},
+      el("h4",{text:"まだご利用いただけません"}),
+      el("div",{html:"接続先が設定されていません。管理者の方は <code>APP_CONFIG.supabaseUrl</code> と "
+        +"<code>supabaseAnonKey</code>、<code>googleClientId</code> を設定してください。"})));
   }
 
   const legal=el("p",{class:"login-legal"},
@@ -1359,11 +1364,11 @@ function gearButton(){
       SYNC.available()
         ? el("button",{class:"gear-item",onclick:async e=>{
             const b=e.currentTarget; b.textContent="同期中…";
-            const ok=await SYNC.run();
+            const ok=await SYNC.run({interactive:true});
             closeGear(); render();
             toast(ok?"同期しました":("同期できませんでした："+SYNC.lastError));
           }},"今すぐ同期")
-        : (SB_READY()&&!AUTH.account?.trial&&!AUTH.isPremium()
+        : (SB_READY()&&!AUTH.isPremium()
             ? el("button",{class:"gear-item",onclick:()=>{closeGear();dlgUpgrade({})}},"端末間の引き継ぎを使う")
             : null),
       el("button",{class:"gear-item",onclick:()=>{closeGear();dlgAccount()}},"アカウント設定"),
@@ -1422,7 +1427,7 @@ function dlgUpgrade({fromLogin}){
       el("ul",{style:{margin:"8px 0 0 17px",lineHeight:"1.8",fontSize:"13.5px"}},
         el("li",{text:"印刷が無制限になります（無料会員は3回まで）"}),
         el("li",{text:"同じGoogleアカウントで端末をまたいでデータを引き継げます"}),
-        el("li",{text:"今後追加される機能をご利用いただけます"})),
+        ),
       el("div",{style:{marginTop:"8px",fontSize:"13px"},text:"お支払いはStripeの決済ページで行われます。カード情報がこのツールに渡ることはありません。"})),
     fromLogin?el("p",{style:{marginTop:"12px",fontSize:"13.5px",color:"var(--ink2)"},
       text:"いまは無料会員としてご利用いただけます。お支払いが完了するとプレミアム会員に切り替わります。"}):null,
@@ -1433,7 +1438,7 @@ function dlgUpgrade({fromLogin}){
       " をご確認ください。"));
 
   const footer=[el("button",{class:"btn",onclick:closeModal},"あとで")];
-  if(SB_READY()&&!AUTH.account?.trial){
+  if(SB_READY()){
     const go=el("button",{class:"btn btn-primary",onclick:async()=>{
       go.disabled=true; go.textContent="決済ページを準備中…";
       try{ await startCheckout() }
@@ -1452,8 +1457,8 @@ function dlgUpgrade({fromLogin}){
 const INQUIRY_CATEGORIES=["不具合の報告","使い方の質問","機能のご要望","お支払いについて","法人契約について","その他"];
 
 function dlgContact(){
-  // 送信できない状態（お試しモード等）では、従来どおりメールでの連絡先を案内する
-  if(!SB_READY()||AUTH.account?.trial)return dlgContactFallback();
+  // 送信のしくみが未設定のときは、メールでの連絡先を案内する
+  if(!SB_READY())return dlgContactFallback();
 
   const cat=el("select",{class:"input"},...INQUIRY_CATEGORIES.map(c=>el("option",{value:c},c)));
   const nameIn=el("input",{class:"input",value:AUTH.account?.name||"",placeholder:"例：佐々木 一郎"});
@@ -1542,13 +1547,26 @@ function viewHome(){
   const emptyBox=el("div",{class:"empty"},el("h3",{text:"見つかりませんでした"}),
     el("p",{text:"別のことばで検索するか、新しいテンプレートを作成してください。"}));
 
+  // まだ1件もないときの案内（見本データは用意せず、白紙から始めてもらう）
+  const firstRun=el("div",{class:"firstrun"},
+    el("h3",{text:"最初のテンプレートを作りましょう"}),
+    el("p",{text:"担任クラス（HR）や授業ごとに1つ作り、名簿と座席レイアウトを登録します。一度作れば、次の座席替えからは条件を選ぶだけで座席表ができます。"}),
+    el("ol",{class:"firstrun-steps"},
+      el("li",{text:"「新しいテンプレート」でクラス名と座席の列数・行数を決める"}),
+      el("li",{text:"「名簿管理」でCSV／Excelを読み込む（1名ずつの追加もできます）"}),
+      el("li",{text:"「座席表履歴」から座席表を作成して印刷"})),
+    el("button",{class:"btn btn-primary btn-lg",onclick:dlgNewTemplate},"新しいテンプレートを作成"));
+
   function drawGrid(){
   const q=R.q.trim().toLowerCase();
-  const list=store.all().filter(t=>!q||
+  const all=store.all();
+  const list=all.filter(t=>!q||
     (titleOf(t)+t.teacherName+t.className+t.subjectName).toLowerCase().includes(q));
   grid.innerHTML="";
+  const noneAtAll=!all.length&&!q;
+  firstRun.style.display=noneAtAll?"":"none";
   emptyBox.style.display=(list.length||!q)?"none":"";
-  grid.style.display=(list.length||!q)?"":"none";
+  grid.style.display=noneAtAll?"none":((list.length||!q)?"":"none");
   grid.append(
     el("button",{class:"tcard tcard-new",onclick:dlgNewTemplate},
       el("span",{class:"plus",text:"＋"}), "新しいテンプレート",
@@ -1584,7 +1602,7 @@ function viewHome(){
       el("div",{class:"searchbar"},
         el("input",{class:"input",type:"search",placeholder:"クラス名・授業名・担任名で検索",
           value:R.q,oninput:e=>{R.q=e.target.value;drawGrid()}}))),
-    grid, emptyBox
+    firstRun, grid, emptyBox
   );
 }
 function dlgNewTemplate(){
@@ -2884,8 +2902,7 @@ function dlgPrintPreview(){
 const PRINT_LIMIT_FREE=3;
 
 async function consumePrint(){
-  // 未設定（お試しモード）では制限しない
-  if(!SB_READY()||AUTH.account?.trial)return {allowed:true,unlimited:true};
+  if(!SB_READY())return {allowed:true,unlimited:true};
   if(AUTH.isPremium())return {allowed:true,unlimited:true};
   try{
     const r=await SB.rpc("consume_print");
@@ -2901,13 +2918,18 @@ async function consumePrint(){
 }
 /* 残り回数の案内（プレビュー内に表示） */
 function printQuotaNote(){
-  if(!SB_READY()||AUTH.account?.trial||AUTH.isPremium())return null;
+  if(!SB_READY()||AUTH.isPremium())return null;
   const used=AUTH.account?.printCount??0;
   const left=Math.max(0,PRINT_LIMIT_FREE-used);
   return el("div",{style:{color:"#e4e8f0",fontSize:"12.5px",width:"100%",textAlign:"center"},
     text:`無料会員の印刷はあと${left}回です（プレミアム会員は無制限）`});
 }
 function dlgPrintLimit(gate){
+  // 上限以外の理由（会員情報を取得できなかった等）は、上限の案内を出さない
+  if(gate.reason&&gate.reason!=="limit_reached"){
+    return dlgError("印刷できませんでした",
+      ["会員情報を確認できませんでした","通信の状態をご確認のうえ、もう一度お試しください"]);
+  }
   modal({title:"無料会員の印刷回数を使い切りました",
     desc:`無料会員でご利用いただける印刷は${gate.limit??PRINT_LIMIT_FREE}回までです。`,
     body:el("div",{},
@@ -2916,7 +2938,7 @@ function dlgPrintLimit(gate){
         el("ul",{style:{margin:"8px 0 0 17px",lineHeight:"1.8"}},
           el("li",{text:"印刷は無制限"}),
           el("li",{text:"同じGoogleアカウントで端末をまたいでデータを引き継ぎ"}),
-          el("li",{text:"今後追加される機能"}))),
+          )),
       el("p",{style:{marginTop:"12px",fontSize:"12.5px",color:"var(--ink2)"},
         text:"作成済みの座席表は、無料会員のままでも引き続き閲覧・編集できます。"})),
     footer:[el("button",{class:"btn",onclick:closeModal},"閉じる"),
@@ -3026,7 +3048,8 @@ async function boot(){
 
   if(SB_READY()){
     // ログイン画面から戻ってきた直後ならセッションを取り込む
-    const justLoggedIn=SB.captureRedirect();
+    const redirectResult=SB.captureRedirect();
+    const justLoggedIn=redirectResult==="ok";
     if(!SB.session)SB.loadSession();
 
     if(SB.session){
@@ -3037,18 +3060,27 @@ async function boot(){
       }else{
         AUTH.signOut();          // セッションが無効になっていた
       }
-    }else if(!AUTH.account?.trial){
-      AUTH.signOut();            // お試し以外はセッションが必要
+    }else{
+      AUTH.signOut();            // セッションがなければログイン画面へ
     }
 
     await store.load();
     render();
 
     if(AUTH.signedIn()&&SYNC.available()){
+      // ログイン直後はSupabaseからGoogleのトークンを受け取っているため確認画面は出ない
       await SYNC.run({quiet:true});
       render();
+      if(SYNC.state==="needsAction"){
+        toast("設定メニューの「今すぐ同期」を押すと、他の端末のデータを読み込めます");
+      }
     }
-    if(justLoggedIn){
+    if(redirectResult==="error"){
+      // 同意しなかった場合など。何も起きないように見えるのを避ける
+      try{ sessionStorage.removeItem("seat-chart-intent") }catch(e){}
+      dlgError("ログインできませんでした",
+        [SB.lastError||"Googleのログインが完了しませんでした","もう一度お試しください"]);
+    }else if(justLoggedIn){
       let intent="free";
       try{ intent=sessionStorage.getItem("seat-chart-intent")||"free";
            sessionStorage.removeItem("seat-chart-intent") }catch(e){}
@@ -3056,6 +3088,8 @@ async function boot(){
       else toast("ログインしました");
     }
   }else{
+    // 接続先が未設定のときは、古いログイン状態を残さずログイン画面を出す
+    AUTH.signOut();
     await store.load();
     render();
   }

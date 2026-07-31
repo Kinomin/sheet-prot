@@ -34,7 +34,8 @@
 2. **Authentication → Providers → Google** を有効化し、1で控えたクライアントID／シークレットを設定
 3. **Authentication → URL Configuration**
    - Site URL： `https://kinomin.github.io/sheet-prot/`
-   - Redirect URLs にも同じURLを追加
+   - Redirect URLs に `https://kinomin.github.io/sheet-prot/` を追加
+     （アプリ側で戻り先の末尾 `index.html` は自動的に取り除きます）
 4. **SQL Editor** で以下を順に実行
    1. [`supabase/migrations/0001_profiles.sql`](./supabase/migrations/0001_profiles.sql)（会員情報）
    2. [`supabase/migrations/0002_limits.sql`](./supabase/migrations/0002_limits.sql)（印刷回数の制限）
