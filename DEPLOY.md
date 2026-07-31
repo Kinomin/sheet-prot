@@ -94,7 +94,7 @@ supabase link --project-ref <プロジェクトID>
 
 ```bash
 supabase secrets set \
-  STRIPE_SECRET_KEY=sk_live_xxx \
+  STRIPE_SECRET_KEY=sk_test_xxx \
   STRIPE_PRICE_ID=price_xxx \
   SITE_URL=https://kinomin.github.io/sheet-prot \
   ALLOWED_ORIGINS=https://kinomin.github.io \
@@ -102,7 +102,14 @@ supabase secrets set \
   INQUIRY_SHARED_SECRET=<手順4で決めた合言葉>
 ```
 
-関数をデプロイします。
+> **`SITE_URL` と `ALLOWED_ORIGINS` は別物です。**
+> `SITE_URL` は戻り先なのでパスを含みます（`.../sheet-prot`）が、
+> `ALLOWED_ORIGINS` は**オリジンだけ**（`https://kinomin.github.io`）です。
+> ここへパスや末尾スラッシュを入れるとブラウザが応答を破棄し、
+> 決済も問い合わせも「サーバーに接続できませんでした」で止まります。
+> （表記ゆれは関数側で吸収するようにしましたが、正しい値を入れてください）
+
+関数をデプロイします（初回・手動確認用）。
 
 ```bash
 supabase functions deploy create-checkout-session
@@ -121,6 +128,23 @@ Webhookはログインを経由しないため、JWT検証を外してデプロ�
 ```bash
 supabase functions deploy stripe-webhook --no-verify-jwt
 ```
+
+### 以降の反映を自動化する（GitHub Actions）
+
+Supabase は Git を見ていないため、`supabase/functions` を更新して `main` に反映しても、
+上のコマンドを誰かが手動で実行するまでは**本番のEdge Functionsには反映されません**。
+`.github/workflows/deploy-edge-functions.yml` を追加済みなので、以下の2つを
+GitHubリポジトリの **Settings → Secrets and variables → Actions** に登録すれば、
+`supabase/functions/**` を変更して `main` にマージするたびに自動デプロイされます。
+
+| Secret名 | 値 | 取得方法 |
+|---|---|---|
+| `SUPABASE_ACCESS_TOKEN` | 個人アクセストークン | [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) で発行 |
+| `SUPABASE_PROJECT_REF` | プロジェクトID | Supabaseの管理画面URLの一部（`https://supabase.com/dashboard/project/<ここ>`） |
+
+登録すると、Actionsタブから `Deploy Supabase Edge Functions` を手動実行（`workflow_dispatch`）することもできます。
+なお、これはEdge Functionsのコードのみを反映するもので、`supabase secrets set` によるシークレットの登録や、
+`supabase/migrations/*.sql` の適用は含まれません（別途手動で行ってください）。
 
 ## 6. Stripe Webhook の登録
 
@@ -180,10 +204,53 @@ Stripeを**テストモード**にして、以下を通しで確認してくだ�
 - [ ] 問い合わせを送信すると、スプレッドシートに行が追加されGmailに通知が届く
 - [ ] 続けて問い合わせを送ると、60秒間は送信できない旨が表示される
 
-確認できたらStripeを**本番モード**に切り替え、本番のキー（`sk_live_...`／`price_...`／`whsec_...`）で
-手順5・6のシークレットを登録し直します。
+## 9. Stripeを本番モードへ切り替える
 
-## 9. 運用について
+テストモードと本番モードは**別の環境**です。商品・Webhook・カスタマーポータルの設定は
+共有されないため、それぞれ本番側で作り直す必要があります。
+
+1. Stripeダッシュボード右上のトグルを**本番環境**へ切り替える
+2. **商品を作成**（テストモードのものは使えません）
+   - 商品名：プレミアム会員／料金：**500円 / 年（継続）**／通貨：JPY
+   - 本番の**価格ID（`price_...`）** を控える
+3. **設定 → 請求 → カスタマーポータル**を本番側でも有効化し、
+   「サブスクリプションのキャンセルを許可」をオンにする（テスト側の設定は引き継がれません）
+4. **開発者 → APIキー**から本番のシークレットキー（`sk_live_...`）を控える
+5. **開発者 → Webhook → エンドポイントを追加**（本番側で作り直す）
+   - URL： `https://<プロジェクトID>.supabase.co/functions/v1/stripe-webhook`
+   - イベントは手順6と同じ5種類
+   - 本番の**署名シークレット（`whsec_...`）** を控える
+6. シークレットを本番の値で登録し直す
+
+   ```bash
+   supabase secrets set \
+     STRIPE_SECRET_KEY=sk_live_xxx \
+     STRIPE_PRICE_ID=price_xxx \
+     STRIPE_WEBHOOK_SECRET=whsec_xxx
+   ```
+
+   > シークレットを更新すれば次回の呼び出しから反映されます。関数の再デプロイは不要です。
+   > `SITE_URL`・`ALLOWED_ORIGINS`・問い合わせ関連はテスト時のままで構いません。
+
+7. **本番で疎通確認**。テストカード（`4242...`）は使えないため、
+   実際のカードで1件申し込み → `profiles.plan` が `premium` になることを確認 →
+   カスタマーポータルから解約、という流れで確認します
+   （年額のため、確認後すぐ解約すれば請求は残りますが返金処理はStripeから行えます）
+8. 事業者情報（特定商取引法に基づく表記）を掲載してから公開する（下記10を参照）
+
+### 決済・問い合わせが動かないときの確認順
+
+| 症状 | 確認すること |
+|---|---|
+| 「サーバーに接続できませんでした」 | `ALLOWED_ORIGINS` がオリジンだけになっているか。関数がデプロイ済みか |
+| 「STRIPE_SECRET_KEY が設定されていません」 | `supabase secrets list` で登録内容を確認 |
+| 「送信できませんでした（unauthorized）」 | `INQUIRY_SHARED_SECRET` とGAS側の `SHARED_SECRET` の不一致 |
+| 「送信できませんでした（スクリプトプロパティが未設定です）」 | GASのスクリプトプロパティ（`SHEET_ID`ほか）の設定漏れ |
+| 決済は完了したがプレミアムにならない | Stripe → Webhook でエラーが出ていないか。`supabase functions logs stripe-webhook` |
+
+関数側のログは `supabase functions logs <関数名>` で確認できます。
+
+## 10. 運用について
 
 - **有効期限切れの保険**：webhookが届かなかった場合に備え、`expire_lapsed_premium()` を1日1回実行することを推奨します
   （Supabase → Database → Cron から `select public.expire_lapsed_premium();` を登録）

@@ -2,21 +2,52 @@
 // Edge Functions 共通処理
 // =============================================================
 
+/**
+ * オリジンの表記ゆれを吸収する。
+ * ALLOWED_ORIGINS には本来 "https://example.github.io" のようなオリジンだけを書くが、
+ * SITE_URL と取り違えてパス付き（.../sheet-prot）や末尾スラッシュ付きで登録されがち。
+ * そのまま比較すると永久に一致せず、ブラウザ側は原因の分からない
+ * 「Failed to fetch」になるため、ここで正規化してから突き合わせる。
+ */
+function normalizeOrigin(value: string): string {
+  const v = value.trim();
+  if (!v || v === "*") return v;
+  try {
+    return new URL(v).origin.toLowerCase();
+  } catch {
+    return v.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
 /** 呼び出しを許可する画面のURL（カンマ区切りで環境変数 ALLOWED_ORIGINS に設定） */
 function allowedOrigins(): string[] {
   return (Deno.env.get("ALLOWED_ORIGINS") ?? "")
-    .split(",").map((s) => s.trim()).filter(Boolean);
+    .split(",").map(normalizeOrigin).filter(Boolean);
 }
 
 export function corsHeaders(req: Request): Record<string, string> {
-  const origin = req.headers.get("Origin") ?? "";
+  const origin = (req.headers.get("Origin") ?? "").trim();
   const list = allowedOrigins();
-  // 許可リストにない場合は最初の登録済みオリジンを返し、他サイトからの利用を防ぐ
-  const allow = list.includes(origin) ? origin : (list[0] ?? "");
+
+  let allow: string;
+  if (!list.length || list.includes("*")) {
+    // 未設定のまま空文字を返すと、ブラウザは全ての応答を破棄してしまう
+    // （関数自体は正常に動いているのに、画面上は何も起きないように見える）。
+    // 認証はAuthorizationヘッダのJWTで行いCookieを使わないため、
+    // 未設定時は呼び出し元をそのまま許可して「動く既定値」にしておく。
+    allow = origin || "*";
+  } else if (list.includes(normalizeOrigin(origin))) {
+    allow = origin;
+  } else {
+    // 許可リストにない場合は登録済みのオリジンを返し、他サイトからの利用を防ぐ
+    allow = list[0];
+  }
+
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   };
 }
@@ -82,11 +113,42 @@ export async function getProfile(userId: string): Promise<Record<string, unknown
   return rows[0] ?? null;
 }
 
+/**
+ * 会員情報の行が必ず存在する状態にしてから返す。
+ * サインアップ時のトリガー（handle_new_user）が動かなかった場合、行が無いまま
+ * PATCH しても PostgREST は0件更新を成功として返すため、stripe_customer_id が
+ * 保存されず「支払ったのにプレミアムにならない」状態になる。その取りこぼしを防ぐ。
+ */
+export async function ensureProfile(
+  userId: string,
+  email: string,
+): Promise<Record<string, unknown>> {
+  const existing = await getProfile(userId);
+  if (existing) return existing;
+
+  const res = await db("profiles", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify({ id: userId, email: email || null }),
+  });
+  if (!res.ok) throw new Error(`会員情報を作成できませんでした: ${await res.text()}`);
+
+  const created = await getProfile(userId);
+  if (!created) throw new Error("会員情報を作成できませんでした");
+  return created;
+}
+
 export async function updateProfile(userId: string, patch: Record<string, unknown>): Promise<void> {
+  // return=representation にして、実際に更新された行数を確認する
+  // （0件でも PATCH は成功扱いになるため、黙って握りつぶさないようにする）
   const res = await db(`profiles?id=eq.${userId}`, {
     method: "PATCH",
-    headers: { Prefer: "return=minimal" },
+    headers: { Prefer: "return=representation" },
     body: JSON.stringify(patch),
   });
   if (!res.ok) throw new Error(`会員情報を更新できませんでした: ${await res.text()}`);
+  const rows = await res.json();
+  if (!Array.isArray(rows) || !rows.length) {
+    throw new Error("会員情報が見つかりませんでした（profiles に行がありません）");
+  }
 }

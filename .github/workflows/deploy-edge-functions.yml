@@ -1,0 +1,41 @@
+name: Deploy Supabase Edge Functions
+
+# supabase/functions 配下に変更があり main へ反映されたときだけ実行する。
+# Supabase はGitを見ていないため、これがないと `supabase functions deploy` を
+# 誰かが手動で実行するまでコードは反映されない。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/**"
+      - ".github/workflows/deploy-edge-functions.yml"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+      # stripe-webhook はStripeからの通知でログインを経由しないため、
+      # JWT検証を無効にしてデプロイする（DEPLOY.md 参照）。他の3つは既定どおり検証する。
+      - name: Deploy functions
+        run: |
+          set -e
+          supabase functions deploy create-checkout-session
+          supabase functions deploy create-portal-session
+          supabase functions deploy send-inquiry
+          supabase functions deploy stripe-webhook --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}

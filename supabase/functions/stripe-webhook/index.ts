@@ -7,13 +7,20 @@
 // ※この関数はJWT検証を無効にしてデプロイすること（Stripeはログインしないため）
 //    supabase functions deploy stripe-webhook --no-verify-jwt
 // =============================================================
-import Stripe from "npm:stripe@17";
-import { db, requireEnv } from "../_shared/util.ts";
+import type Stripe from "npm:stripe@17";
+import { getStripe } from "../_shared/stripe.ts";
+import { db } from "../_shared/util.ts";
 
-const stripe = new Stripe(requireEnv("STRIPE_SECRET_KEY"), { apiVersion: "2024-12-18.acacia" });
-
-/** Stripeの顧客IDから会員を特定して更新する */
-async function updateByCustomer(customerId: string, patch: Record<string, unknown>): Promise<void> {
+/**
+ * Stripeの顧客IDから会員を特定して更新する。
+ * 顧客IDで見つからない場合は、metadataに載せてある利用者IDで取り直す
+ * （申し込み前にprofilesの行が無かった等で顧客IDが保存されていない場合の保険）。
+ */
+async function updateByCustomer(
+  customerId: string,
+  patch: Record<string, unknown>,
+  fallbackUserId?: string | null,
+): Promise<void> {
   const res = await db(`profiles?stripe_customer_id=eq.${encodeURIComponent(customerId)}`, {
     method: "PATCH",
     headers: { Prefer: "return=representation" },
@@ -21,7 +28,34 @@ async function updateByCustomer(customerId: string, patch: Record<string, unknow
   });
   if (!res.ok) throw new Error(`会員情報の更新に失敗: ${await res.text()}`);
   const rows = await res.json();
-  if (!rows.length) console.warn(`該当する会員が見つかりません customer=${customerId}`);
+  if (rows.length) return;
+
+  if (!fallbackUserId) {
+    console.warn(`該当する会員が見つかりません customer=${customerId}`);
+    return;
+  }
+
+  // 顧客IDごと結び付け直す
+  const retry = await db(`profiles?id=eq.${encodeURIComponent(fallbackUserId)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ ...patch, stripe_customer_id: customerId }),
+  });
+  if (!retry.ok) throw new Error(`会員情報の更新に失敗: ${await retry.text()}`);
+  const retryRows = await retry.json();
+  if (!retryRows.length) {
+    console.warn(`該当する会員が見つかりません customer=${customerId} user=${fallbackUserId}`);
+  }
+}
+
+/** 有効期限を取り出す。Stripe API 2025-03-31(basil) 以降は購読アイテム側へ移動している */
+function periodEndOf(sub: Stripe.Subscription): string | null {
+  const raw = sub as unknown as {
+    current_period_end?: number;
+    items?: { data?: Array<{ current_period_end?: number }> };
+  };
+  const at = raw.current_period_end ?? raw.items?.data?.[0]?.current_period_end;
+  return typeof at === "number" ? new Date(at * 1000).toISOString() : null;
 }
 
 /** 購読の状態を会員種別へ翻訳する */
@@ -32,26 +66,29 @@ function planFromSubscription(sub: Stripe.Subscription): Record<string, unknown>
   return {
     plan: premium ? "premium" : "free",
     stripe_subscription_id: sub.id,
-    current_period_end: sub.current_period_end
-      ? new Date(sub.current_period_end * 1000).toISOString()
-      : null,
+    current_period_end: periodEndOf(sub),
     cancel_at_period_end: !!sub.cancel_at_period_end,
   };
+}
+
+/** 購読のmetadataから利用者IDを取り出す */
+function userIdOf(sub: Stripe.Subscription): string | null {
+  return (sub.metadata?.supabase_user_id as string | undefined) ?? null;
 }
 
 Deno.serve(async (req) => {
   const signature = req.headers.get("stripe-signature");
   if (!signature) return new Response("署名がありません", { status: 400 });
 
+  let stripe: ReturnType<typeof getStripe>;
   let event: Stripe.Event;
   try {
+    stripe = getStripe();
+    const secret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
+    if (!secret) throw new Error("STRIPE_WEBHOOK_SECRET が設定されていません");
     // 署名検証には生のリクエストボディが必要
     const body = await req.text();
-    event = await stripe.webhooks.constructEventAsync(
-      body,
-      signature,
-      requireEnv("STRIPE_WEBHOOK_SECRET"),
-    );
+    event = await stripe.webhooks.constructEventAsync(body, signature, secret);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("署名の検証に失敗:", message);
@@ -77,7 +114,9 @@ Deno.serve(async (req) => {
         // 実際の有効化は subscription の内容から行う
         if (typeof session.subscription === "string") {
           const sub = await stripe.subscriptions.retrieve(session.subscription);
-          if (customerId) await updateByCustomer(customerId, planFromSubscription(sub));
+          if (customerId) {
+            await updateByCustomer(customerId, planFromSubscription(sub), userId ?? userIdOf(sub));
+          }
         }
         break;
       }
@@ -91,7 +130,7 @@ Deno.serve(async (req) => {
           const patch = event.type === "customer.subscription.deleted"
             ? { plan: "free", cancel_at_period_end: false, stripe_subscription_id: null }
             : planFromSubscription(sub);
-          await updateByCustomer(customerId, patch);
+          await updateByCustomer(customerId, patch, userIdOf(sub));
         }
         break;
       }
