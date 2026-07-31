@@ -1338,11 +1338,9 @@ function dlgCorporate(){
         el("li",{text:"ご利用人数・学校数に応じたお見積り"}),
         el("li",{text:"請求書・見積書の発行"}),
         el("li",{text:"導入時の設定サポート"})),
-      APP_CONFIG.supportEmail
-        ? el("p",{style:{marginTop:"14px",fontSize:"13.5px"}},"お問い合わせ先：",
-            el("a",{class:"link",href:"mailto:"+APP_CONFIG.supportEmail},APP_CONFIG.supportEmail))
-        : el("p",{class:"login-hint",style:{marginTop:"14px"},html:
-            "問い合わせ先は <code>APP_CONFIG.corporateContactUrl</code> または <code>APP_CONFIG.supportEmail</code> に設定してください。"})),
+      el("p",{style:{marginTop:"14px",fontSize:"13.5px",lineHeight:"1.7"}},
+        "ご相談は、Googleアカウントでログイン（無料会員のままで構いません）後、"+
+        "画面右上の設定アイコン（⚙）→「お問い合わせ」から、種別で「法人契約について」を選んで送信してください。")),
     footer:[el("button",{class:"btn btn-primary",onclick:closeModal},"閉じる")]});
 }
 
@@ -1456,11 +1454,12 @@ function dlgUpgrade({fromLogin}){
 
 const INQUIRY_CATEGORIES=["不具合の報告","使い方の質問","機能のご要望","お支払いについて","法人契約について","その他"];
 
-function dlgContact(){
+function dlgContact(presetCategory){
   // 送信のしくみが未設定のときは、メールでの連絡先を案内する
   if(!SB_READY())return dlgContactFallback();
 
   const cat=el("select",{class:"input"},...INQUIRY_CATEGORIES.map(c=>el("option",{value:c},c)));
+  if(presetCategory)cat.value=presetCategory;
   const nameIn=el("input",{class:"input",value:AUTH.account?.name||"",placeholder:"例：佐々木 一郎"});
   const mailIn=el("input",{class:"input",type:"email",value:AUTH.account?.email||"",placeholder:"返信先のメールアドレス"});
   const msgIn=el("textarea",{class:"input",rows:"6",style:{padding:"10px 12px",resize:"vertical",lineHeight:"1.7"},
@@ -1496,10 +1495,11 @@ function dlgContact(){
       counter,
       el("p",{style:{marginTop:"10px",fontSize:"12px",color:"var(--ink3)",lineHeight:"1.7"},
         text:"ご利用のブラウザ情報が一緒に送信されます。生徒の名簿の内容が送信されることはありません。"}),
-      el("p",{style:{marginTop:"10px",fontSize:"13.5px"}},
-        APP_CONFIG.corporateContactUrl
-          ? el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約のご相談はこちら")
-          : el("button",{class:"link",onclick:()=>{closeModal();dlgCorporate()}},"法人契約のご相談はこちら"))),
+      APP_CONFIG.corporateContactUrl
+        ? el("p",{style:{marginTop:"10px",fontSize:"13.5px"}},
+            el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約のご相談はこちら"))
+        : el("p",{style:{marginTop:"10px",fontSize:"13.5px"}},
+            el("button",{class:"link",onclick:()=>{cat.value="法人契約について";cat.focus()}},"法人契約のご相談はこちら"))),
     footer:[el("button",{class:"btn",onclick:closeModal},"閉じる"),send]});
 }
 
