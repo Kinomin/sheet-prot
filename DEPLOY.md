@@ -109,7 +109,7 @@ supabase secrets set \
 > 決済も問い合わせも「サーバーに接続できませんでした」で止まります。
 > （表記ゆれは関数側で吸収するようにしましたが、正しい値を入れてください）
 
-関数をデプロイします。
+関数をデプロイします（初回・手動確認用）。
 
 ```bash
 supabase functions deploy create-checkout-session
@@ -128,6 +128,23 @@ Webhookはログインを経由しないため、JWT検証を外してデプロ�
 ```bash
 supabase functions deploy stripe-webhook --no-verify-jwt
 ```
+
+### 以降の反映を自動化する（GitHub Actions）
+
+Supabase は Git を見ていないため、`supabase/functions` を更新して `main` に反映しても、
+上のコマンドを誰かが手動で実行するまでは**本番のEdge Functionsには反映されません**。
+`.github/workflows/deploy-edge-functions.yml` を追加済みなので、以下の2つを
+GitHubリポジトリの **Settings → Secrets and variables → Actions** に登録すれば、
+`supabase/functions/**` を変更して `main` にマージするたびに自動デプロイされます。
+
+| Secret名 | 値 | 取得方法 |
+|---|---|---|
+| `SUPABASE_ACCESS_TOKEN` | 個人アクセストークン | [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) で発行 |
+| `SUPABASE_PROJECT_REF` | プロジェクトID | Supabaseの管理画面URLの一部（`https://supabase.com/dashboard/project/<ここ>`） |
+
+登録すると、Actionsタブから `Deploy Supabase Edge Functions` を手動実行（`workflow_dispatch`）することもできます。
+なお、これはEdge Functionsのコードのみを反映するもので、`supabase secrets set` によるシークレットの登録や、
+`supabase/migrations/*.sql` の適用は含まれません（別途手動で行ってください）。
 
 ## 6. Stripe Webhook の登録
 
