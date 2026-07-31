@@ -4,18 +4,18 @@
 // クライアントからは金額も商品も指定させない。サーバー側の STRIPE_PRICE_ID を
 // 必ず使うことで、価格を書き換えられる余地をなくしている。
 // =============================================================
-import Stripe from "npm:stripe@17";
-import { getProfile, getUser, json, preflight, requireEnv, updateProfile } from "../_shared/util.ts";
-
-const stripe = new Stripe(requireEnv("STRIPE_SECRET_KEY"), { apiVersion: "2024-12-18.acacia" });
+import { getStripe } from "../_shared/stripe.ts";
+import { ensureProfile, getUser, json, preflight, requireEnv, updateProfile } from "../_shared/util.ts";
 
 Deno.serve(async (req) => {
   const pre = preflight(req);
   if (pre) return pre;
 
   try {
+    const stripe = getStripe();
     const user = await getUser(req);
-    const profile = await getProfile(user.id);
+    // 行が無いまま進むと顧客IDを保存できないため、ここで必ず用意する
+    const profile = await ensureProfile(user.id, user.email);
 
     // すでに有効なプレミアム会員なら、二重に購読させない
     if (profile?.plan === "premium") {
