@@ -283,6 +283,14 @@ table.tbl tr:hover td{background:#f8fafd}
 .card:hover{border-color:var(--indigo);background:var(--indigo-t)}
 .card.dragging{opacity:.4}
 .card.placed{opacity:.42;background:#f7f9fc}
+/* タップで選択中の名前カード（ドラッグできない端末での配置手段） */
+.card.picked{border-color:var(--amber);background:#fffcf3;box-shadow:0 0 0 3px var(--amber-t);opacity:1}
+.pick-guide{margin-top:9px;font-size:11.5px;line-height:1.5;color:var(--ink3)}
+.pick-guide.on{color:var(--amber);font-weight:700}
+/* カードを選んでいる間は、置ける席をはっきり示す。
+   固定席の縁取り（box-shadow）を消さないよう、ここでは outline を使う */
+.picking .seat:not(.off){cursor:pointer;outline:2px dashed var(--amber);outline-offset:-3px}
+.picking .seat:not(.off):hover{outline-style:solid;background:#fffcf3}
 .card .no{font-family:var(--mono);font-size:12px;color:var(--ink3);width:22px;text-align:right;flex:0 0 auto}
 .card .nm{font-weight:700;font-size:14.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card .g{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
@@ -452,6 +460,7 @@ table.tbl tr:hover td{background:#f8fafd}
   .seat .stamp{display:none !important}
   .seat.sel,.seat.drop{box-shadow:none;background:#fff}
   .seat.flash{animation:none;background:#fff}
+  .seat{outline:none !important}   /* 配置先の案内（点線）は紙に出さない */
   .ritem{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .ritem .x{display:none !important}
 }
@@ -462,6 +471,7 @@ table.tbl tr:hover td{background:#f8fafd}
 .print-preview .seat .stamp{display:none !important}
 .print-preview .seat.sel,.print-preview .seat.drop{box-shadow:none;background:#fff}
 .print-preview .seat.flash{animation:none;background:#fff}
+.print-preview .seat{outline:none !important}
 .print-preview .ritem .x{display:none !important}
 .print-preview .seat,.print-preview .ritem{pointer-events:none}
 </style>
@@ -676,6 +686,8 @@ async function idbDelete(id){
    職員室の共用パソコンなど1つのブラウザを複数の先生が使う場面で、
    別のアカウントでログインした人に生徒名簿が見えてしまうことを防ぐため、
    テンプレートに ownerId を持たせ、読み込み時に自分のものだけを取り出す。 */
+/* ownerId を持たない旧データを引き継いだアカウント（1端末につき1人だけ） */
+const LEGACY_CLAIM_KEY="seat-chart-legacy-owner";
 const store={
   data:{templates:[]},
   all(){return this.data.templates},
@@ -699,11 +711,19 @@ const store={
     if(typeof indexedDB==="undefined")return;
     try{
       const all=await idbGetAll();
-      // ownerId導入前に作られたデータは、この端末の利用者のものとして引き継ぐ
+      // ownerId導入前に作られたデータは、この端末の利用者のものとして引き継ぐ。
+      // ただし引き継げるのは「この端末で最初に引き継いだアカウント」だけに限る。
+      // 誰でも引き継げるようにすると、共用パソコンで後からログインした別の先生に
+      // 旧データ（前の先生の生徒名簿）が渡ってしまう。
       const legacy=all.filter(t=>!t.ownerId);
       if(legacy.length){
-        legacy.forEach(t=>{t.ownerId=owner});
-        await Promise.all(legacy.map(t=>idbPut(t)));
+        let claimed=null;
+        try{ claimed=localStorage.getItem(LEGACY_CLAIM_KEY) }catch(e){}
+        if(!claimed||claimed===owner){
+          legacy.forEach(t=>{t.ownerId=owner});
+          await Promise.all(legacy.map(t=>idbPut(t)));
+          try{ localStorage.setItem(LEGACY_CLAIM_KEY,owner) }catch(e){}
+        }
       }
       this.data.templates=all
         .filter(t=>t.ownerId===owner)
@@ -720,6 +740,10 @@ const chartsByDate = t => [...(t.charts||[])].sort((a,b)=>
 /* その座席表のひとつ前（開始日がより古い直近の座席表）を返す */
 const prevChartOf = (t,c) => chartsByDate(t).filter(x=>
   x.id!==c.id && String(x.startDate||"")<=String(c.startDate||""))[0]||null;
+
+/* 座席を「前の行から・左の列から」の順に並べ直す。
+   seats配列の順番は行の追加などで実際の並びとずれるため、図として描くときは必ずこれを通す。 */
+const seatsInOrder = layout => [...layout.seats].sort((a,b)=>a.row-b.row||a.col-b.col);
 
 const titleOf = t => t.kind==="elective" ? (t.subjectName||"（授業名未設定）") : (t.className||"（クラス名未設定）");
 const subOf   = t => t.kind==="elective" ? `担当：${t.teacherName||"—"}` : `担任：${t.teacherName||"—"}`;
@@ -1115,6 +1139,7 @@ function mergeTemplates(local,remote,tomb){
 const SYNC={
   state:"off",          // off | idle | syncing | ok | error | needsAction
   lastAt:0, lastError:"", timer:null,
+  pending:false,        // 同期中に届いた変更。終わり次第もう一度送る
   /* 端末間の引き継ぎはプレミアム会員の機能 */
   available(){
     return CLOUD.configured()&&AUTH.signedIn()&&AUTH.isPremium();
@@ -1140,8 +1165,11 @@ const SYNC={
      interactive:true … 利用者がボタンを押した場合。必要ならGoogleの確認画面を開いてよい */
   async run({quiet,interactive}={}){
     if(!this.available()){ this.state="off"; return false }
-    if(this.state==="syncing")return false;
-    this.state="syncing"; if(!quiet)refreshSyncUI();
+    // 同期中に来た要求は捨てず、終わってからもう一度走らせる。
+    // 捨ててしまうと、同期の最中に行った編集がクラウドへ届かないまま残る。
+    if(this.state==="syncing"){ this.pending=true; return false }
+    this.state="syncing"; this.pending=false; if(!quiet)refreshSyncUI();
+    const before=templatesSignature();
     try{
       // 押された直後なら、失効していても確認画面を開いて取り直せる
       if(interactive&&!CLOUD.hasToken())await CLOUD.getToken(true);
@@ -1196,9 +1224,17 @@ const SYNC={
       return false;
     }finally{
       refreshSyncUI();
+      // 他の端末の変更を取り込んだのに画面が古いままだと「同期したのに出てこない」と見える。
+      // ダイアログを開いている最中は入力を壊さないよう、描画し直さない。
+      if(templatesSignature()!==before&&!$("#layer").innerHTML)render();
+      if(this.pending){ this.pending=false; this.schedule() }
     }
   },
 };
+/* 取り込みの前後で内容が変わったかを比べるための目印 */
+function templatesSignature(){
+  return store.all().map(t=>`${t.id}:${t.updatedAt||0}`).sort().join("|");
+}
 /* 同期状態の表示だけを更新する（画面全体を作り直さない） */
 function refreshSyncUI(){
   document.querySelectorAll("[data-sync-label]").forEach(n=>{n.textContent=SYNC.label()});
@@ -1575,7 +1611,8 @@ function viewHome(){
       const enabled=t.layout.seats.filter(s=>s.enabled).length;
       const mini=el("div",{class:"mini",style:{gridTemplateColumns:`repeat(${t.layout.cols},7px)`,
         gridTemplateRows:`repeat(${t.layout.rows},7px)`}});
-      t.layout.seats.forEach(s=>mini.append(el("i",{style:{opacity:s.enabled?"":"0.12"}})));
+      // 配列の順番は「＋前」で行を足したときなどに実際の並びとずれるため、行・列順に並べ直して描く
+      seatsInOrder(t.layout).forEach(s=>mini.append(el("i",{style:{opacity:s.enabled?"":"0.12"}})));
       return el("button",{class:"tcard",onclick:()=>go({view:"tpl",tplId:t.id,tab:"basic"})},
         el("div",{class:"tk"},
           el("div",{},
@@ -1718,7 +1755,7 @@ function previewSheet(t){
     aspectRatio:String(ar),boxShadow:"0 2px 12px -6px rgba(0,0,0,.3)",display:"grid",
     gridTemplateColumns:`repeat(${t.layout.cols},1fr)`,gridTemplateRows:`repeat(${t.layout.rows},1fr)`,
     gap:"2px",padding:"14px 8px 8px"}});
-  t.layout.seats.forEach(s=>sh.append(el("i",{style:{background:s.enabled?"var(--indigo)":"transparent",
+  seatsInOrder(t.layout).forEach(s=>sh.append(el("i",{style:{background:s.enabled?"var(--indigo)":"transparent",
     border:s.enabled?"none":"1px dashed #dde2ea",opacity:s.enabled?".5":"1",borderRadius:"1px"}})));
   box.append(sh);
   return el("div",{},el("div",{class:"eyebrow",style:{marginBottom:"7px"},
@@ -1905,6 +1942,18 @@ function applyRosterRows(rows,t,draw){
   });
   if(!out.length)return dlgError("名簿を読み込めませんでした",["データ行がありません"]);
 
+  // 出席番号は座席への割り当ての鍵になるため、重複していると
+  // 同じ生徒が2席に出て別の生徒が1人も出ない座席表ができてしまう。読み込む前に止める。
+  const seenNo=new Set(), dupNo=[];
+  out.forEach(s=>{ if(seenNo.has(s.no)){ if(!dupNo.includes(s.no))dupNo.push(s.no) } else seenNo.add(s.no) });
+  if(dupNo.length){
+    const list=dupNo.slice(0,8).join("・")+(dupNo.length>8?" ほか":"");
+    return dlgError("名簿を読み込めませんでした",
+      [`出席番号が重複しています：${list}`,
+       "同じ番号の生徒がいると、座席表で取り違えが起こります",
+       "番号を振り直すか、空欄の番号を埋めてから読み込んでください"]);
+  }
+
   // 名簿を入れ替えると、既存の座席表の配置や固定席・NGペアが「存在しない生徒番号」を
   // 指したままになる。黙って壊さず、影響を数えて確認をとってから掃除する。
   const impact=rosterSwapImpact(t,out);
@@ -1929,6 +1978,11 @@ function applyRosterRows(rows,t,draw){
     store.save(t);draw();toast(`${out.length}名を読み込みました`);
   }
 }
+
+/* 次に振る出席番号。名簿の人数ではなく「いま使われている最大の番号＋1」で決める。
+   人数から決めると、途中の生徒を削除したあとに追加したときに既存の番号とぶつかり、
+   同じ番号の生徒が2人できてしまう（座席には片方しか出ず、もう片方は消える）。 */
+const nextStudentNo=roster=>(roster||[]).reduce((m,s)=>Math.max(m,Number(s.no)||0),0)+1;
 
 /* 名簿を newRoster に入れ替えたときに失われる設定の件数を数える。
    固定席・NGペアは画面に見えているテンプレート側の件数で伝える
@@ -1990,7 +2044,7 @@ function dlgAddStudent(t,draw){
     footer:[el("button",{class:"btn",onclick:closeModal},"キャンセル"),
       el("button",{class:"btn btn-primary",onclick:()=>{
         if(!nm.value.trim())return nm.focus();
-        t.roster.push({no:t.roster.length+1,name:nm.value.trim(),kana:kn.value.trim(),
+        t.roster.push({no:nextStudentNo(t.roster),name:nm.value.trim(),kana:kn.value.trim(),
           romaji:rj.value.trim()||toRomaji(kn.value),gender:gd.value});
         store.save(t);draw();closeModal();toast("追加しました");
       }},"追加する")]});
@@ -2003,10 +2057,26 @@ function dlgError(title,causes){
     footer:[el("button",{class:"btn btn-primary",onclick:closeModal},"閉じる")]});
 }
 
+/* 座席レイアウトから消えた席・無効にした席を指している固定席を取り除く。
+   放置すると「固定席・NGペア」タブに「→ —」と表示される幽霊が残り、
+   さらにランダム配置ではその固定が黙って無視される（固定したつもりの生徒が動く）。
+   過去の座席表のスナップショット（c.fixedSeats）は履歴なので触らない。 */
+function purgeInvalidFixedSeats(t){
+  const alive=new Set(t.layout.seats.filter(s=>s.enabled).map(s=>s.id));
+  const before=(t.fixedSeats||[]).length;
+  t.fixedSeats=(t.fixedSeats||[]).filter(f=>alive.has(f.seatId));
+  return before-t.fixedSeats.length;
+}
+
 /* --- 座席レイアウト編集 --- */
+const MAX_GRID=12;                 // 列数・行数の上限（用紙に収まらなくなるため）
 function paneLayout(t){
   const L=t.layout;
-  const rerender=()=>{store.save(t);go({})};
+  const rerender=()=>{
+    const dropped=purgeInvalidFixedSeats(t);
+    store.save(t);go({});
+    if(dropped)toast(`席がなくなったため、固定席 ${dropped}件を解除しました`);
+  };
 
   function regrid(cols,rows){
     const keep=new Map(L.seats.map(s=>[`${s.row}:${s.col}`,s]));
@@ -2016,6 +2086,12 @@ function paneLayout(t){
       out.push(old?{...old,row:r,col:c}:{id:uid("s"),row:r,col:c,enabled:true,tags:[]});
     }
     L.cols=cols;L.rows=rows;L.seats=out;rerender();
+  }
+  // 空きが無いときは行を1つ足すが、際限なく増やすと1席が潰れて読めなくなるため上限で止める
+  function canAddRow(){
+    if(L.rows<MAX_GRID)return true;
+    toast(`行数は${MAX_GRID}行までです`);
+    return false;
   }
   function addRowTop(){
     L.seats.forEach(s=>s.row++);
@@ -2029,10 +2105,12 @@ function paneLayout(t){
   const at=(r,c)=>L.seats.find(s=>s.row===r&&s.col===c);
   function addFront(c){
     for(let r=0;r<L.rows;r++){const s=at(r,c);if(s&&!s.enabled){s.enabled=true;return rerender()}}
+    if(!canAddRow())return;
     addRowTop();at(0,c).enabled=true;rerender();
   }
   function addBack(c){
     for(let r=L.rows-1;r>=0;r--){const s=at(r,c);if(s&&!s.enabled){s.enabled=true;return rerender()}}
+    if(!canAddRow())return;
     addRowBottom();at(L.rows-1,c).enabled=true;rerender();
   }
 
@@ -2049,6 +2127,7 @@ function paneLayout(t){
     g.append(el("div",{class:"num",style:{fontSize:"10.5px",color:"var(--ink3)",display:"grid",placeItems:"center"},text:r+1}));
     for(let c=0;c<L.cols;c++){
       const s=at(r,c);
+      if(!s){ g.append(el("div",{class:"lay-seat off"})); continue }   // 念のための欠番対策
       g.append(el("button",{class:"lay-seat"+(s.enabled?"":" off"),
         title:s.enabled?"クリックで削除（位置は維持）":"クリックで復元",
         onclick:()=>{s.enabled=!s.enabled;rerender()}},`${r+1}-${c+1}`));
@@ -2069,8 +2148,8 @@ function paneLayout(t){
         el("label",{class:"field",style:{marginBottom:"0"}},el("span",{text:"列数（横）"}),colsIn),
         el("label",{class:"field",style:{marginBottom:"0"}},el("span",{text:"行数（縦）"}),rowsIn),
         el("button",{class:"btn",onclick:()=>regrid(
-          Math.min(12,Math.max(1,+colsIn.value||L.cols)),
-          Math.min(12,Math.max(1,+rowsIn.value||L.rows)))},"再生成")),
+          Math.min(MAX_GRID,Math.max(1,+colsIn.value||L.cols)),
+          Math.min(MAX_GRID,Math.max(1,+rowsIn.value||L.rows)))},"再生成")),
       el("div",{class:"note",style:{marginTop:"14px"},
         text:"再生成しても、すでに削除した席の状態はできる限り引き継ぎます。"}),
       el("h3",{style:{marginTop:"22px"},text:"③ 保存と反映"}),
@@ -2131,7 +2210,7 @@ function paneRules(t){
   const pickNote=el("div",{style:{fontSize:"12.5px",color:"var(--ink2)",marginTop:"8px"}});
   function drawPicker(){
     pickGrid.innerHTML="";
-    t.layout.seats.slice().sort((a,b)=>a.row-b.row||a.col-b.col).forEach(s=>{
+    seatsInOrder(t.layout).forEach(s=>{
       if(!s.enabled){pickGrid.append(el("div",{class:"lay-seat off",text:`${s.row+1}-${s.col+1}`}));return}
       const takenBy=t.fixedSeats.find(f=>f.seatId===s.id);
       pickGrid.append(el("button",{
@@ -2245,7 +2324,11 @@ function dlgNewChart(t){
 /* =====================================================================
    画面 3 — 座席表編集
    ===================================================================== */
-const E={mode:"place",sel:null,q:"",unplacedOnly:false,undo:[],redo:[]};
+/* pick … タップで選んだ名前カードの出席番号。
+   スマホ・タブレットではHTML5のドラッグ＆ドロップが働かず、
+   名前カードを席へ運ぶ手段がまったく無かったため、
+   「カードをタップ → 席をタップ」でも配置できるようにしている。 */
+const E={mode:"place",sel:null,pick:null,q:"",unplacedOnly:false,undo:[],redo:[]};
 const MAXHIST=60;
 
 function ctx(){
@@ -2299,11 +2382,11 @@ function viewEditor(){
     el("div",{class:"div"}),
     el("button",{class:"btn",onclick:()=>dlgRandom(t,c)},"ランダム配置"),
     el("button",{class:"btn"+(E.mode==="swap"?" on":""),onclick:()=>{
-      E.mode=E.mode==="swap"?"place":"swap";E.sel=null;renderEditorBody();
+      E.mode=E.mode==="swap"?"place":"swap";E.sel=null;E.pick=null;renderEditorBody();
       toast(E.mode==="swap"?"交換モード：2つの席を順にクリック":"交換モードを終了しました");
     }},"交換モード"),
     el("button",{class:"btn"+(E.mode==="room"?" on":""),onclick:()=>{
-      E.mode=E.mode==="room"?"place":"room";E.sel=null;renderEditorBody();
+      E.mode=E.mode==="room"?"place":"room";E.sel=null;E.pick=null;renderEditorBody();
       toast(E.mode==="room"?"教室レイアウト編集：ドラッグで移動、×で削除":"教室レイアウト編集を終了しました");
     }},"教室レイアウト"),
     el("div",{class:"div"}),
@@ -2324,9 +2407,12 @@ function viewEditor(){
 function renderEditorBody(){
   const host=$("#edbody"); if(!host)return go({});
   const k=ctx(); const{t,c}=k;
-  host.className="ed-body mode-"+E.mode;
+  host.className="ed-body mode-"+E.mode+(E.pick!=null?" picking":"");
+  // 名前カード一覧のスクロール位置は、1人配置するたびに先頭へ戻ると使いづらいので引き継ぐ
+  const cardScroll=host.querySelector(".cards")?.scrollTop||0;
   host.innerHTML="";
   host.append(sheetPane(t,c),cardPane(t,c));
+  const newCards=host.querySelector(".cards"); if(newCards)newCards.scrollTop=cardScroll;
   const placed=Object.keys(c.assign).length, cap=c.layout.seats.filter(s=>s.enabled).length;
   const cnt=$("#cnt"); if(cnt)cnt.textContent=`配置 ${placed} / ${cap}席・名簿 ${t.roster.length}名`;
   requestAnimationFrame(fitSheet);
@@ -2413,8 +2499,7 @@ function sheetPane(t,c){
   (c.room||[]).forEach(ri=>room.append(roomItemEl(ri,c,teacher)));
 
   const grid=el("div",{class:"seatgrid",style:{gridTemplateColumns:`repeat(${c.layout.cols},var(--cw))`}});
-  const byRC=[...c.layout.seats].sort((a,b)=>a.row-b.row||a.col-b.col);
-  byRC.forEach(s=>grid.append(seatEl(s,t,c,teacher)));
+  seatsInOrder(c.layout).forEach(s=>grid.append(seatEl(s,t,c,teacher)));
   room.append(grid);
 
   const sheet=el("div",{class:"sheet",style:{aspectRatio:String(paperAR(t.print.paper,t.print.orient))}},head,room);
@@ -2520,6 +2605,12 @@ function seatEl(s,t,c,teacher){
   if(isFixed)n.append(el("span",{class:"stamp",text:"固定"}));
 
   n.addEventListener("click",()=>{
+    // 名前カードをタップして選んである場合は、この席へ配置する（タッチ端末の配置手段）
+    if(E.mode==="place"&&E.pick!=null&&s.enabled){
+      const no=E.pick; E.pick=null;
+      placeStudent({no},s,t,c);
+      return;
+    }
     if(E.mode==="swap"){
       if(!E.sel){E.sel=s.id;renderEditorBody();return}
       if(E.sel===s.id){E.sel=null;renderEditorBody();return}
@@ -2561,6 +2652,7 @@ function placeStudent(p,seat,t,c){
       body:el("div",{class:"note",text:`この席には ${curSt?curSt.name:"別の生徒"} さんが配置されています。入れ替えますか？`}),
       footer:[el("button",{class:"btn",onclick:closeModal},"いいえ"),
         el("button",{class:"btn btn-primary",onclick:()=>{closeModal();commit()}},"はい、入れ替える")]});
+    renderEditorBody();   // 確認を待つ間も、選択中のカードの表示は元に戻しておく
     return;
   }
   commit();
@@ -2589,7 +2681,10 @@ function setSeatFixed(t,c,seatId,no,fixed){
   t.fixedSeats=drop(t.fixedSeats);
   if(fixed){
     c.fixedSeats.push({no,seatId});
-    t.fixedSeats.push({no,seatId});
+    // テンプレート側は、いまのレイアウトに実在する（有効な）席のときだけ登録する。
+    // 過去の座席表のスナップショットにしか無い席を書き込むと、
+    // 「固定席・NGペア」タブに座席が「—」の幽霊として残ってしまう。
+    if(t.layout.seats.some(s=>s.id===seatId&&s.enabled))t.fixedSeats.push({no,seatId});
   }
 }
 
@@ -2618,6 +2713,15 @@ function cardPane(t,c){
   const placedNos=new Set(Object.values(c.assign));
   const cards=el("div",{class:"cards"});
   const cnt=el("span",{class:"cnt"});
+  const guide=el("div",{class:"pick-guide"});
+
+  function drawGuide(){
+    const st=E.pick!=null?t.roster.find(s=>s.no===E.pick):null;
+    guide.className="pick-guide"+(st?" on":"");
+    guide.textContent=st
+      ? `${st.name} さんを置く席をタップ（カードをもう一度で解除）`
+      : "カードをタップ → 席をタップでも配置できます";
+  }
 
   function drawCards(){
   const q=E.q.trim();
@@ -2629,7 +2733,8 @@ function cardPane(t,c){
   const narrow=window.matchMedia("(max-width:640px)").matches;
   list.forEach(s=>{
     const placed=placedNos.has(s.no);
-    const n=el("div",{class:"card"+(placed?" placed":""),draggable:"true",title:s.name},
+    const n=el("div",{class:"card"+(placed?" placed":"")+(E.pick===s.no?" picked":""),
+      draggable:"true",title:s.name,"aria-pressed":String(E.pick===s.no)},
       el("span",{class:"no",text:s.no}),
       el("span",{class:"g "+(s.gender==="m"?"m":"f")}),
       el("span",{class:"nm",text:narrow?(s.name.trim().split(/[\s　]+/)[0]):s.name}),
@@ -2637,10 +2742,17 @@ function cardPane(t,c){
     n.addEventListener("dragstart",e=>{
       e.dataTransfer.setData("text/plain",JSON.stringify({no:s.no}));n.classList.add("dragging")});
     n.addEventListener("dragend",()=>n.classList.remove("dragging"));
+    // タップで選択／選択解除（ドラッグできない端末のための経路）
+    n.addEventListener("click",()=>{
+      if(E.mode!=="place"){ E.mode="place"; E.sel=null }   // 交換・備品モードのままだと席をタップできない
+      E.pick=E.pick===s.no?null:s.no;
+      renderEditorBody();
+    });
     cards.append(n);
   });
   if(!list.length)cards.append(el("p",{style:{color:"var(--ink3)",fontSize:"13px",padding:"12px 2px"},
     text:E.unplacedOnly?"全員の席が決まりました。":"該当する生徒がいません。"}));
+  drawGuide();
   }
   drawCards();
 
@@ -2652,7 +2764,8 @@ function cardPane(t,c){
       el("label",{class:"tog"},
         el("input",{type:"checkbox",checked:E.unplacedOnly,style:{accentColor:"var(--indigo)",width:"17px",height:"17px"},
           onchange:e=>{E.unplacedOnly=e.target.checked;drawCards()}}),
-        "未配置の生徒だけ表示")),
+        "未配置の生徒だけ表示"),
+      guide),
     cards);
 }
 
@@ -2820,6 +2933,8 @@ let PRINT_PREVIEW_OPEN=false;
    移動してプレビュー表示し、「はい、印刷する」を押したときだけ実際に印刷する。 */
 function dlgPrintPreview(){
   const k=ctx(); if(!k)return; const{t}=k;
+  // 選択中の名前カードがあると配置先の案内（点線）が出たままになるので、先に解除する
+  if(E.pick!=null){ E.pick=null; renderEditorBody() }
   const sheetEl=$(".sheet"); if(!sheetEl)return;
   const homeParent=sheetEl.parentElement, homeNext=sheetEl.nextSibling;
 
@@ -3001,7 +3116,7 @@ function render(){
   if(R.view==="home")v.append(viewHome());
   else if(R.view==="tpl")v.append(viewTemplate());
   else if(R.view==="edit"){
-    if(E.chartId!==R.chartId){E.chartId=R.chartId;E.undo=[];E.redo=[];E.mode="place";E.sel=null;E.q="";E.unplacedOnly=false}
+    if(E.chartId!==R.chartId){E.chartId=R.chartId;E.undo=[];E.redo=[];E.mode="place";E.sel=null;E.pick=null;E.q="";E.unplacedOnly=false}
     v.style.overflow="hidden";
     v.append(viewEditor());
     renderEditorBody();
@@ -3013,15 +3128,18 @@ function render(){
 document.addEventListener("keydown",e=>{
   if(R.view!=="edit")return;
   if(PRINT_PREVIEW_OPEN)return; // プレビュー中はdlgPrintPreview専用のEscハンドラのみ有効
+  // ダイアログを開いている間はEsc以外を効かせない。
+  // これを見ていないと、ランダム配置などの確認中に S や Ctrl+Z が裏の座席表に効いてしまう。
+  if($("#layer").innerHTML){ if(e.key==="Escape")closeModal(); return }
   const inField=/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName||"");
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"&&!e.shiftKey){e.preventDefault();doUndo()}
   else if((e.ctrlKey||e.metaKey)&&(e.key.toLowerCase()==="y"||(e.shiftKey&&e.key.toLowerCase()==="z"))){e.preventDefault();doRedo()}
   else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="p"){e.preventDefault();dlgPrintPreview()}
   else if(e.key==="Escape"){
-    if($("#layer").innerHTML)closeModal();
+    if(E.pick!=null){E.pick=null;renderEditorBody()}
     else if(E.mode!=="place"){E.mode="place";E.sel=null;renderEditorBody()}
   }
-  else if(!inField&&e.key.toLowerCase()==="s"){E.mode=E.mode==="swap"?"place":"swap";E.sel=null;renderEditorBody()}
+  else if(!inField&&e.key.toLowerCase()==="s"){E.mode=E.mode==="swap"?"place":"swap";E.sel=null;E.pick=null;renderEditorBody()}
 });
 
 /* =====================================================================
@@ -3035,7 +3153,17 @@ async function settleCheckoutReturn(result){
   toast("お支払いを確認しています…");
   for(let i=0;i<6;i++){
     const plan=await AUTH.refreshPlanFromServer();
-    if(plan==="premium"){ render(); toast("プレミアム会員になりました。ありがとうございます"); return }
+    if(plan==="premium"){
+      render(); toast("プレミアム会員になりました。ありがとうございます");
+      // プレミアムになって初めて端末間の引き継ぎが有効になる。
+      // ここで一度走らせないと、次に保存するまでこの端末のデータが上がらない。
+      if(SYNC.available()){
+        await SYNC.run({quiet:true});
+        if(SYNC.state!=="ok")
+          setTimeout(()=>toast("設定メニューの「今すぐ同期」を押すと、この端末のデータを引き継げます"),2600);
+      }
+      return;
+    }
     await new Promise(r=>setTimeout(r,1500));
   }
   render();
