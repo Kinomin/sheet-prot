@@ -10,3 +10,6 @@ desktop.ini
 
 # Local scratch
 *.local.*
+
+# Supabase CLI（`supabase link`のローカルキャッシュ。プロジェクトIDなどを含むため共有しない）
+supabase/.temp/
