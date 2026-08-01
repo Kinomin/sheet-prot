@@ -2536,12 +2536,15 @@ function seatEl(s,t,c,teacher){
     n.append(el("span",{class:"sno",text:st.no}),
              el("span",{class:"sname",text:st.name.replace(/\s+/g,"")}),
              el("span",{class:"sromaji",text:st.romaji}));
-    n.draggable=E.mode==="place";
+    // 固定された座席の生徒は、ドラッグでよそへ動かせないようにする
+    n.draggable=E.mode==="place"&&!isFixed;
   }
   if(isFixed)n.append(el("span",{class:"stamp",text:"固定"}));
 
   n.addEventListener("click",()=>{
     if(E.mode==="swap"){
+      // 固定された座席は交換の対象にしない（「固定席・NGペア」タブでの固定内容と食い違うため）
+      if(isFixed)return toast("固定された座席は交換できません。先に固定を解除してください");
       if(!E.sel){E.sel=s.id;renderEditorBody();return}
       if(E.sel===s.id){E.sel=null;renderEditorBody();return}
       pushUndo("座席の交換");
@@ -2575,6 +2578,11 @@ function seatEl(s,t,c,teacher){
 
 function placeStudent(p,seat,t,c){
   if(!seat.enabled)return;
+  // 固定された座席は、ドラッグ＆ドロップでもよそから配置できないようにする
+  if((c.fixedSeats||[]).some(f=>f.seatId===seat.id)){
+    toast("固定された座席には配置できません。先に固定を解除してください");
+    return;
+  }
   const cur=c.assign[seat.id];
   if(cur!=null&&cur!==p.no){
     const curSt=t.roster.find(x=>x.no===cur);
