@@ -78,7 +78,11 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
   flex:0 0 auto;height:58px;display:flex;align-items:center;gap:14px;
   padding:0 20px;background:var(--card);border-bottom:1.5px solid var(--line);
 }
-.brand{display:flex;align-items:baseline;gap:9px;font-weight:800;letter-spacing:.01em}
+/* パンくずが伸びる画面（編集画面）では上部バーの幅が足りなくなる。
+   縮めてよいのは横スクロールできるパンくず側で、アプリ名は
+   「席メ／イト」のように途中で折り返させない。 */
+.brand{display:flex;align-items:baseline;gap:9px;font-weight:800;letter-spacing:.01em;
+  flex:0 0 auto;white-space:nowrap}
 .brand .mark{
   width:26px;height:26px;border-radius:6px;background:var(--indigo);position:relative;flex:0 0 auto;
   align-self:center;
@@ -1769,6 +1773,13 @@ function previewSheet(t){
 /* --- 名簿管理 --- */
 function paneRoster(t){
   const tbody=el("tbody");
+  // 人数は draw() のたびに書き直す。描画時の値を文字列で埋め込むと、
+  // 読み込み・追加・削除をしても「0名（男 0 / 女 0）」のまま変わらない。
+  const countLabel=el("span",{class:"num",style:{fontSize:"12.5px",color:"var(--ink3)"}});
+  const drawCount=()=>{
+    countLabel.textContent=`${t.roster.length}名（男 ${t.roster.filter(s=>s.gender==="m").length}`
+      +` / 女 ${t.roster.filter(s=>s.gender==="f").length}）`;
+  };
   // すでに重複した出席番号を持ってしまっている名簿を、その場で直せるようにする
   const dupBox=el("div",{style:{display:"none"}});
   const drawDup=()=>{
@@ -1792,6 +1803,7 @@ function paneRoster(t){
       }},"出席番号を振り直す")));
   };
   const draw=()=>{
+    drawCount();
     drawDup();
     tbody.innerHTML="";
     t.roster.forEach(s=>tbody.append(el("tr",{},
@@ -1833,8 +1845,7 @@ function paneRoster(t){
     el("div",{class:"box"},
       el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:"11px"}},
         el("h3",{text:"名簿"}),
-        el("span",{class:"num",style:{fontSize:"12.5px",color:"var(--ink3)"},
-          text:`${t.roster.length}名（男 ${t.roster.filter(s=>s.gender==="m").length} / 女 ${t.roster.filter(s=>s.gender==="f").length}）`})),
+        countLabel),
       dupBox,
       el("div",{class:"scroller"},
         el("table",{class:"tbl"},
@@ -2981,17 +2992,29 @@ function dlgPrintPreview(){
   FIT.print=true;
   requestAnimationFrame(()=>{
     fitSheet();
-    const availW=previewBox.clientWidth, availH=previewBox.clientHeight;
-    const scale=Math.min(1, availW/sheetEl.offsetWidth, availH/sheetEl.offsetHeight);
-    sheetEl.style.transform=scale<1?`scale(${scale})`:"";
-    sheetEl.style.transformOrigin="top center";
+    // clientHeight/Width には padding が含まれる。差し引かずに使うと、
+    // 用紙の下端が padding のぶんだけ枠からはみ出し、最後列がスクロールしないと見えない。
+    const cs=getComputedStyle(previewBox);
+    const availW=previewBox.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
+    const availH=previewBox.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
+    const w=sheetEl.offsetWidth, h=sheetEl.offsetHeight;
+    const scale=Math.min(1, availW/w, availH/h);
+    if(scale<1){
+      sheetEl.style.transform=`scale(${scale})`;
+      sheetEl.style.transformOrigin="top center";
+      // transform は配置上の大きさを変えないため、縮小した分だけ下に余白が残る。
+      // その差を打ち消して、枠の中にちょうど収める。
+      sheetEl.style.marginBottom=(-(h*(1-scale)))+"px";
+    }else{
+      sheetEl.style.transform=""; sheetEl.style.marginBottom="";
+    }
   });
 
   function onKey(e){ if(e.key==="Escape")cancel(); }
   document.addEventListener("keydown",onKey);
 
   function teardown(){
-    sheetEl.style.transform="";
+    sheetEl.style.transform=""; sheetEl.style.marginBottom="";
     if(homeNext)homeParent.insertBefore(sheetEl,homeNext); else homeParent.append(sheetEl);
     backdrop.remove();
     document.removeEventListener("keydown",onKey);
