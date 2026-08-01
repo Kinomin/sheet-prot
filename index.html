@@ -676,6 +676,17 @@ async function idbDelete(id){
    職員室の共用パソコンなど1つのブラウザを複数の先生が使う場面で、
    別のアカウントでログインした人に生徒名簿が見えてしまうことを防ぐため、
    テンプレートに ownerId を持たせ、読み込み時に自分のものだけを取り出す。 */
+/* ownerIdを持たない旧データを引き取れるのは、この端末で最初にログインした1人だけ。
+   戻り値が true のときだけ引き取ってよい。 */
+const LEGACY_OWNER_KEY="seat-chart-legacy-owner";
+function claimLegacyOwner(owner){
+  try{
+    const claimed=localStorage.getItem(LEGACY_OWNER_KEY);
+    if(!claimed){ localStorage.setItem(LEGACY_OWNER_KEY,owner); return true }
+    return claimed===owner;
+  }catch(e){ return false }   // localStorageが使えない場合は引き取らない（安全側に倒す）
+}
+
 const store={
   data:{templates:[]},
   all(){return this.data.templates},
@@ -699,9 +710,11 @@ const store={
     if(typeof indexedDB==="undefined")return;
     try{
       const all=await idbGetAll();
-      // ownerId導入前に作られたデータは、この端末の利用者のものとして引き継ぐ
+      // ownerId導入前に作られたデータは、最初にログインした人のものとして引き継ぐ。
+      // 「今ログインしている人」に無条件で渡すと、職員室の共用パソコンで
+      // あとからログインした別の先生に、前の先生の生徒名簿が渡ってしまう。
       const legacy=all.filter(t=>!t.ownerId);
-      if(legacy.length){
+      if(legacy.length&&claimLegacyOwner(owner)){
         legacy.forEach(t=>{t.ownerId=owner});
         await Promise.all(legacy.map(t=>idbPut(t)));
       }
@@ -1194,7 +1207,14 @@ const SYNC={
       list.forEach(t=>{ t.ownerId=owner });
       Object.keys(tomb).forEach(id=>{ idbDelete(id).catch(()=>{}) });
       await Promise.all(list.map(t=>idbPut(t)));
+
+      // 取り込みでテンプレートの実体が差し替わることがある。開いている画面は
+      // 古いオブジェクトを掴んだままなので、入れ替わったら画面を作り直す。
+      // （そのまま編集を続けると、古い内容を上書き保存してしまう）
+      const openBefore=R.tplId?store.get(R.tplId):null;
       store.data.templates=list.sort((a,b)=>b.createdAt-a.createdAt);
+      const openAfter=R.tplId?store.get(R.tplId):null;
+      if(openBefore!==openAfter)render();
 
       this.state="ok"; this.lastAt=Date.now(); this.lastError="";
       return true;
@@ -2277,29 +2297,31 @@ function ctx(){
 /* 固定席は座席表(c.fixedSeats)とテンプレート(t.fixedSeats)の両方に書き込むため、
    undo/redoでも必ず両方を巻き戻す。片方だけ戻すと座席ピッカーとの表示が食い違う。 */
 function snapNow(){
-  const k=ctx();
+  const k=ctx(); if(!k)return null;
   return{assign:clone(k.c.assign),room:clone(k.c.room),
          fixed:clone(k.c.fixedSeats),tplFixed:clone(k.t.fixedSeats)};
 }
 function pushUndo(label){
-  const k=ctx(); if(!k)return;
-  E.undo.push({...snapNow(),label});
+  const s=snapNow(); if(!s)return;
+  E.undo.push({...s,label});
   if(E.undo.length>MAXHIST)E.undo.shift();
   E.redo.length=0;
 }
 function applySnap(s){
-  const k=ctx();
+  const k=ctx(); if(!k||!s)return;
   k.c.assign=clone(s.assign);k.c.room=clone(s.room);k.c.fixedSeats=clone(s.fixed);
   if(s.tplFixed)k.t.fixedSeats=clone(s.tplFixed);
 }
 function doUndo(){
   if(!E.undo.length)return toast("これ以上戻せません");
-  const cur=snapNow();const s=E.undo.pop();E.redo.push(cur);applySnap(s);
+  const cur=snapNow(); if(!cur)return renderEditorBody();
+  const s=E.undo.pop();E.redo.push(cur);applySnap(s);
   store.save(ctx().t);renderEditorBody();toast("元に戻しました"+(s.label?`：${s.label}`:""));
 }
 function doRedo(){
   if(!E.redo.length)return toast("やり直す操作がありません");
-  const cur=snapNow();const s=E.redo.pop();E.undo.push(cur);applySnap(s);
+  const cur=snapNow(); if(!cur)return renderEditorBody();
+  const s=E.redo.pop();E.undo.push(cur);applySnap(s);
   store.save(ctx().t);renderEditorBody();toast("やり直しました");
 }
 
@@ -2344,7 +2366,15 @@ function viewEditor(){
 
 function renderEditorBody(){
   const host=$("#edbody"); if(!host)return go({});
-  const k=ctx(); const{t,c}=k;
+  // 他の端末での削除が同期で届いた場合など、開いていた座席表が途中で無くなることがある。
+  // ここで落ちると編集画面が真っ白のまま操作できなくなるため、安全な画面へ戻す。
+  const k=ctx();
+  if(!k){
+    toast("開いていた座席表が見つかりませんでした");
+    return go(store.get(R.tplId)?{view:"tpl",chartId:null,tab:"history"}
+                                :{view:"home",tplId:null,chartId:null});
+  }
+  const{t,c}=k;
   host.className="ed-body mode-"+E.mode;
   host.innerHTML="";
   host.append(sheetPane(t,c),cardPane(t,c));
@@ -2478,7 +2508,8 @@ function roomItemEl(ri,c,teacher){
     style:{left:mirrorX(ri.x)+"%",top:mirrorY(ri.y)+"%",width:ri.w+"%",height:ri.h+"%"}},
     ri.label,
     el("button",{class:"x",title:"削除",onclick:e=>{e.stopPropagation();
-      pushUndo("教室備品の削除");c.room=c.room.filter(x=>x.id!==ri.id);store.save(ctx().t);renderEditorBody()}},"×"));
+      const k=ctx(); if(!k)return renderEditorBody();
+      pushUndo("教室備品の削除");c.room=c.room.filter(x=>x.id!==ri.id);store.save(k.t);renderEditorBody()}},"×"));
   // 重なり回避（avoidRoomOverlaps）が参照するための、データ本体と「本来置きたい画面上の位置」
   n.__ri=ri;
   n.__screen={x:mirrorX(ri.x),y:mirrorY(ri.y)};
@@ -2503,7 +2534,7 @@ function roomItemEl(ri,c,teacher){
       ri.x=mirrorX(cur.x); ri.y=mirrorY(cur.y);
       n.__screen={x:cur.x,y:cur.y};
       n.style.left=cur.x+"%"; n.style.top=cur.y+"%";
-      store.save(ctx().t);
+      const k=ctx(); if(k)store.save(k.t);
     };
     document.addEventListener("pointermove",mv);document.addEventListener("pointerup",up);
   });
@@ -3050,7 +3081,11 @@ document.addEventListener("keydown",e=>{
     if($("#layer").innerHTML)closeModal();
     else if(E.mode!=="place"){E.mode="place";E.sel=null;renderEditorBody()}
   }
-  else if(!inField&&e.key.toLowerCase()==="s"){E.mode=E.mode==="swap"?"place":"swap";E.sel=null;renderEditorBody()}
+  // 「S」で交換モード。ダイアログを開いている間や Ctrl+S（ブラウザの保存）では反応させない
+  else if(!inField&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!$("#layer").innerHTML
+          &&e.key.toLowerCase()==="s"){
+    E.mode=E.mode==="swap"?"place":"swap";E.sel=null;renderEditorBody();
+  }
 });
 
 /* =====================================================================
