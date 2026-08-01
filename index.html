@@ -516,10 +516,20 @@ const APP_CONFIG={
 
   premiumPriceLabel:"500円 / 年",
 
+  // ===== β版のあいだの一時設定 =====
+  // 課金の受付を止めている期間は true にする。
+  //   ・会員種別の選択とプレミアムへの導線を画面から隠す（全員が無料会員として利用）
+  //   ・印刷回数の制限をかけない
+  // 課金を開始するときは false に戻すだけでよい（他のコードは変更不要）。
+  // ※ 決済のしくみ自体は残してあるため、false に戻せばそのまま再開できる。
+  betaFreeMode:true,
+
   // 利用規約・プライバシーポリシーの掲載先（同じリポジトリ内のページでも可）
   termsUrl:"./terms.html",
   privacyUrl:"./privacy.html",
 };
+/* β版：課金の受付を止めているあいだは true */
+const BETA_FREE=()=>APP_CONFIG.betaFreeMode===true;
 
 /* Supabaseへの接続が設定済みか。ログインはすべてGoogle認証を経由する */
 const SB_READY=()=>!!(APP_CONFIG.supabaseUrl&&APP_CONFIG.supabaseAnonKey);
@@ -1146,6 +1156,8 @@ const SYNC={
     return CLOUD.configured()&&AUTH.signedIn()&&AUTH.isPremium();
   },
   label(){
+    // β版のあいだは会員種別を出さない（全員が無料会員のため）
+    if(BETA_FREE()&&!this.available())return "この端末のみに保存";
     if(AUTH.signedIn()&&!AUTH.isPremium())return "この端末のみに保存（無料会員）";
     if(!this.available())return "この端末のみに保存";
     if(this.state==="syncing")return "同期中…";
@@ -1325,7 +1337,13 @@ function viewLogin(){
       ? "Googleでログインしたあと、決済画面（Stripe）へ進みます。"
       : "Googleアカウントを選ぶだけで始められます。";
   }
-  syncPlan();
+  // β版のあいだは会員種別を選ばせず、全員を無料会員として扱う
+  if(BETA_FREE()){
+    plan="free"; LOGIN_INTENT="free";
+    notice.textContent="Googleアカウントを選ぶだけで始められます。";
+  }else{
+    syncPlan();
+  }
 
   if(SB_READY()){
     gbtn.append(
@@ -1351,8 +1369,12 @@ function viewLogin(){
       el("div",{class:"login-brand"},el("span",{class:"mark"}),
         el("div",{},el("b",{text:"席メイト"}),
           el("div",{class:"login-sub",text:"条件を選ぶだけで座席表ができます"}))),
-      el("div",{class:"eyebrow",style:{marginBottom:"9px"},text:"会員種別を選んでください"}),
-      el("div",{class:"plans"},freeCard,premCard),
+      BETA_FREE()?null:el("div",{class:"eyebrow",style:{marginBottom:"9px"},text:"会員種別を選んでください"}),
+      BETA_FREE()?null:el("div",{class:"plans"},freeCard,premCard),
+      BETA_FREE()?el("div",{class:"note",style:{marginBottom:"14px"}},
+        el("b",{text:"β版につき、すべての機能を無料でお使いいただけます"}),
+        el("div",{style:{marginTop:"6px",fontSize:"13px",lineHeight:"1.7"},
+          text:"座席表の作成・編集・印刷に制限はありません。データはお使いの端末に保存されます。"})):null,
       notice,
       gbtn,
       legal,
@@ -1389,8 +1411,8 @@ function gearButton(){
       el("div",{class:"gear-who"},
         el("div",{class:"gear-name",text:AUTH.displayName()}),
         el("div",{class:"gear-plan"},
-          el("span",{class:"chip "+(AUTH.isPremium()?"chip-a":"chip-g"),
-            text:AUTH.isPremium()?"プレミアム会員":"無料会員"})),
+          el("span",{class:"chip "+(BETA_FREE()?"chip-g":AUTH.isPremium()?"chip-a":"chip-g"),
+            text:BETA_FREE()?"β版（無料）":AUTH.isPremium()?"プレミアム会員":"無料会員"})),
         el("div",{class:"gear-sync","data-sync-label":"",text:SYNC.label()})),
       SYNC.available()
         ? el("button",{class:"gear-item",onclick:async e=>{
@@ -1399,7 +1421,7 @@ function gearButton(){
             closeGear(); render();
             toast(ok?"同期しました":("同期できませんでした："+SYNC.lastError));
           }},"今すぐ同期")
-        : (SB_READY()&&!AUTH.isPremium()
+        : (SB_READY()&&!AUTH.isPremium()&&!BETA_FREE()
             ? el("button",{class:"gear-item",onclick:()=>{closeGear();dlgUpgrade({})}},"端末間の引き継ぎを使う")
             : null),
       el("button",{class:"gear-item",onclick:()=>{closeGear();dlgAccount()}},"アカウント設定"),
@@ -1413,7 +1435,12 @@ document.addEventListener("click",()=>closeGear());
 
 function dlgAccount(){
   const nameIn=el("input",{class:"input",value:AUTH.account?.name||"",placeholder:"例：佐々木 一郎"});
-  const planRow=AUTH.isPremium()
+  const planRow=BETA_FREE()
+    ? el("div",{class:"note"},
+        el("b",{text:"β版につき、すべての機能を無料でお使いいただけます"}),
+        el("div",{style:{marginTop:"6px",fontSize:"13px",lineHeight:"1.7"},
+          text:"座席表の作成・編集・印刷に制限はありません。データはお使いの端末に保存されます。"}))
+    : AUTH.isPremium()
     ? el("div",{},
         el("div",{class:"note"},el("b",{text:"プレミアム会員です。"}),
           AUTH.account?.periodEnd
@@ -1452,6 +1479,8 @@ function dlgAccount(){
 }
 
 function dlgUpgrade({fromLogin}){
+  // β版のあいだは課金の受付を止めているため、この画面は出さない
+  if(BETA_FREE())return;
   const body=el("div",{},
     el("div",{class:"note"},
       el("b",{text:`プレミアム会員：${APP_CONFIG.premiumPriceLabel}`}),
@@ -3055,6 +3084,8 @@ const PRINT_LIMIT_FREE=3;
 
 async function consumePrint(){
   if(!SB_READY())return {allowed:true,unlimited:true};
+  // β版のあいだは回数を数えない（サーバー側の残数も消費しない）
+  if(BETA_FREE())return {allowed:true,unlimited:true};
   if(AUTH.isPremium())return {allowed:true,unlimited:true};
   try{
     const r=await SB.rpc("consume_print");
@@ -3070,7 +3101,7 @@ async function consumePrint(){
 }
 /* 残り回数の案内（プレビュー内に表示） */
 function printQuotaNote(){
-  if(!SB_READY()||AUTH.isPremium())return null;
+  if(!SB_READY()||AUTH.isPremium()||BETA_FREE())return null;
   const used=AUTH.account?.printCount??0;
   const left=Math.max(0,PRINT_LIMIT_FREE-used);
   return el("div",{style:{color:"#e4e8f0",fontSize:"12.5px",width:"100%",textAlign:"center"},
@@ -3145,7 +3176,7 @@ function render(){
       el("div",{class:"div",style:{width:"1px",height:"24px",background:"var(--line)"}}),
       crumb, el("div",{class:"spacer"}),
       el("span",{class:"chip chip-g beta-chip",text:"β版"}),
-      AUTH.isPremium()?el("span",{class:"chip chip-a",text:"プレミアム"}):null,
+      (AUTH.isPremium()&&!BETA_FREE())?el("span",{class:"chip chip-a",text:"プレミアム"}):null,
       gearButton()),
     el("div",{class:"view",id:"view"}));
 
@@ -3240,7 +3271,7 @@ async function boot(){
       let intent="free";
       try{ intent=sessionStorage.getItem("seat-chart-intent")||"free";
            sessionStorage.removeItem("seat-chart-intent") }catch(e){}
-      if(intent==="premium"&&!AUTH.isPremium())dlgUpgrade({fromLogin:true});
+      if(intent==="premium"&&!AUTH.isPremium()&&!BETA_FREE())dlgUpgrade({fromLogin:true});
       else toast("ログインしました");
     }
   }else{
