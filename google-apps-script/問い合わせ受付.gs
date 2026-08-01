@@ -71,7 +71,7 @@ function doPost(e) {
     // Gmailで通知（このスクリプトの所有者のアカウントから送信されます）
     if (cfg.notifyTo) {
       const body = [
-        '座席表ツールに問い合わせが届きました。',
+        '席メイトに問い合わせが届きました。',
         '',
         '受信日時：' + Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy/MM/dd HH:mm:ss'),
         '種別　　：' + row[1],
@@ -89,11 +89,11 @@ function doPost(e) {
 
       MailApp.sendEmail({
         to: cfg.notifyTo,
-        subject: '【座席表ツール】問い合わせ（' + row[1] + '）',
+        subject: '【席メイト】問い合わせ（' + row[1] + '）',
         body: body,
         // 返信するとそのまま問い合わせ者へ返せるようにする
         replyTo: row[3] || undefined,
-        name: '座席表ツール',
+        name: '席メイト',
       });
     }
 

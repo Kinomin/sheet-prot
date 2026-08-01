@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>自動座席表作成ツール（β版）</title>
+<title>席メイト（β版）</title>
 <style>
 :root{
   --ink:#161d29; --ink2:#4a5972; --ink3:#7c8aa3;
@@ -473,7 +473,7 @@ table.tbl tr:hover td{background:#f8fafd}
 <script>
 "use strict";
 /* =====================================================================
-   自動座席表作成ツール（β版） single-file / no build / 依存ライブラリなし
+   席メイト（β版） single-file / no build / 依存ライブラリなし
    ---------------------------------------------------------------------
    ブラウザだけで動作し、名簿・座席表データは端末のIndexedDBと
    利用者本人のGoogleドライブ（プレミアム会員は端末間で同期）に保存する。
@@ -1325,7 +1325,7 @@ function viewLogin(){
   return el("div",{class:"login"},
     el("div",{class:"login-card"},
       el("div",{class:"login-brand"},el("span",{class:"mark"}),
-        el("div",{},el("b",{text:"自動座席表作成ツール"}),
+        el("div",{},el("b",{text:"席メイト"}),
           el("div",{class:"login-sub",text:"条件を選ぶだけで座席表ができます"}))),
       el("div",{class:"eyebrow",style:{marginBottom:"9px"},text:"会員種別を選んでください"}),
       el("div",{class:"plans"},freeCard,premCard),
@@ -1532,7 +1532,7 @@ function dlgContactFallback(){
     body:el("div",{},
       mail
         ? el("div",{class:"note"},"メール：",
-            el("a",{class:"link",href:"mailto:"+mail+"?subject="+encodeURIComponent("【座席表ツール】お問い合わせ")},mail))
+            el("a",{class:"link",href:"mailto:"+mail+"?subject="+encodeURIComponent("【席メイト】お問い合わせ")},mail))
         : el("div",{class:"alert"},el("h4",{text:"問い合わせ先が未設定です"}),
             el("div",{html:"<code>APP_CONFIG.supportEmail</code> に連絡先を設定してください。"})),
       el("p",{style:{marginTop:"14px",fontSize:"13px",color:"var(--ink2)"},
@@ -3018,7 +3018,7 @@ function render(){
   app.innerHTML="";
   app.append(
     el("div",{class:"topbar no-print"},
-      el("div",{class:"brand"},el("span",{class:"mark"}),"自動座席表作成ツール"),
+      el("div",{class:"brand"},el("span",{class:"mark"}),"席メイト"),
       el("div",{class:"div",style:{width:"1px",height:"24px",background:"var(--line)"}}),
       crumb, el("div",{class:"spacer"}),
       el("span",{class:"chip chip-g beta-chip",text:"β版"}),
