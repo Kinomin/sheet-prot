@@ -44,6 +44,13 @@ revoke all on public.profiles from anon, authenticated;
 grant select on public.profiles to authenticated;
 grant update (display_name) on public.profiles to authenticated;
 
+-- Edge Functions は service_role キーでこのテーブルへ直接アクセスする
+-- （決済の顧客ID紐付け・問い合わせ送信時の会員種別確認など）。
+-- service_role には既定でテーブル権限が自動付与されるとは限らないため、明示的に付与する。
+-- これが無いと "permission denied for table profiles" で失敗し、
+-- 決済にも問い合わせにも進めなくなる。
+grant select, insert, update, delete on public.profiles to service_role;
+
 -- 更新時刻の自動更新
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql as $$
