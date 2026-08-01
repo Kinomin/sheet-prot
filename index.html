@@ -640,6 +640,73 @@ function newChart(tpl,startDate){
           assign:{}, createdAt:Date.now(), updatedAt:Date.now()};
 }
 
+/* =====================================================================
+   お試し用のサンプル（β版のあいだだけ）
+   ---------------------------------------------------------------------
+   白紙から始めてもらう方針は変えていないが、β版では
+   「名簿を用意しないと何も試せない」状態を避けるため、
+   初回ログイン時に見本のテンプレートを1つだけ用意する。
+
+   ・実在の生徒と取り違えないよう、クラス名・担任名・氏名すべて見本と分かる内容にする
+   ・利用者が消したあとに勝手に復活しないよう、アカウントごとに一度だけ作る
+   ・すでに自分のテンプレートがある場合は作らない
+   ===================================================================== */
+const SAMPLE_ROSTER=[
+  ["佐藤 大輝","さとうだいき","m"],   ["鈴木 陽菜","すずきひな","f"],
+  ["高橋 蓮","たかはしれん","m"],     ["田中 結衣","たなかゆい","f"],
+  ["伊藤 悠真","いとうゆうま","m"],   ["渡辺 芽依","わたなべめい","f"],
+  ["山本 湊","やまもとみなと","m"],   ["中村 咲良","なかむらさくら","f"],
+  ["小林 樹","こばやしいつき","m"],   ["加藤 葵","かとうあおい","f"],
+  ["吉田 颯太","よしだそうた","m"],   ["山田 凛","やまだりん","f"],
+  ["佐々木 陸","ささきりく","m"],     ["山口 美咲","やまぐちみさき","f"],
+  ["松本 大和","まつもとやまと","m"], ["井上 心春","いのうえこはる","f"],
+  ["木村 蒼","きむらそう","m"],       ["林 莉子","はやしりこ","f"],
+  ["斎藤 悠斗","さいとうゆうと","m"], ["清水 花音","しみずかのん","f"],
+  ["山崎 翔太","やまざきしょうた","m"],["森 楓","もりかえで","f"],
+  ["池田 健太","いけだけんた","m"],   ["橋本 桜","はしもとさくら","f"],
+  ["阿部 拓海","あべたくみ","m"],     ["石川 千尋","いしかわちひろ","f"],
+  ["山下 涼介","やましたりょうすけ","m"],["中島 彩花","なかじまあやか","f"],
+  ["石井 直樹","いしいなおき","m"],   ["小川 愛美","おがわまなみ","f"],
+  ["前田 亮","まえだりょう","m"],     ["岡田 綾乃","おかだあやの","f"],
+  ["長谷川 大地","はせがわだいち","m"],["藤田 結菜","ふじたゆいな","f"],
+  ["後藤 隼人","ごとうはやと","m"],
+];
+
+function makeSampleTemplate(){
+  const t=newTemplate({kind:"homeroom",className:"サンプル 1年1組",
+    teacherName:"見本 太郎",cols:6,rows:6});
+  t.roster=SAMPLE_ROSTER.map((r,i)=>
+    ({no:i+1,name:r[0],kana:r[1],romaji:toRomaji(r[1]),gender:r[2]}));
+  // すぐに印刷まで試せるよう、出席番号順に並べた座席表を1枚つけておく
+  const c=newChart(t,todayISO());
+  c.name="見本の座席表";
+  const seats=[...c.layout.seats].filter(s=>s.enabled)
+    .sort((a,b)=>a.row-b.row||a.col-b.col);
+  t.roster.forEach((s,i)=>{ if(seats[i])c.assign[seats[i].id]=s.no });
+  t.charts=[c];
+  return t;
+}
+
+/* サンプルを入れたかどうかはアカウントごとに覚えておく。
+   共用パソコンで先生ごとに1回ずつ用意し、消したあとは復活させない。 */
+const SAMPLE_KEY="seat-chart-sample-done";
+function sampleDoneList(){
+  try{ const v=JSON.parse(localStorage.getItem(SAMPLE_KEY)||"[]"); return Array.isArray(v)?v:[] }
+  catch(e){ return null }              // 読めない場合は作らない側に倒す
+}
+/* サンプルを用意した場合だけ true を返す */
+function ensureSampleTemplate(){
+  if(!BETA_FREE())return false;
+  const owner=currentOwnerId(); if(!owner)return false;
+  const done=sampleDoneList();
+  if(done===null||done.includes(owner))return false;
+  try{ localStorage.setItem(SAMPLE_KEY,JSON.stringify(done.concat(owner))) }
+  catch(e){ return false }             // 記録できないなら作らない（毎回増えてしまうため）
+  if(store.all().length)return false;  // すでに自分のデータがあるなら触らない
+  store.add(makeSampleTemplate());
+  return true;
+}
+
 /* ---------------- IndexedDB（生API・外部ライブラリ不使用） ---------------- */
 const DB_NAME="seat-chart-tool", DB_VERSION=1, DB_STORE="templates";
 function idbOpen(){
@@ -2911,9 +2978,17 @@ function solve(t,c,opt){
     return{ok:false,causes:["固定席どうしが条件に違反しています（NGペアが隣接、または男女交互が成立しない）","固定席の位置を見直してください"]};
 
   // ⑥ 残りをランダムに（バックトラッキング）
-  let nodes=0;const LIMIT=400000;
   const order=openIdx.slice();          // 行優先＝左と上が確定済みになり枝刈りが効く
-  const items=shuffle(pool.concat(new Array(blanks).fill(null)));
+  const ATTEMPTS=8, LIMIT=50000;
+  let nodes=0;
+
+  /* 同じ性別で、NGペアも持たない生徒どうしは「入れ替えても成立/不成立が変わらない」。
+     この場合は1人を試せば十分で、まとめないと同じ形の並べ替えを何万通りも試すことになり、
+     解があるのに探索を打ち切ってしまう（男18・女17の6×6で実際に起きていた）。
+     「前回と同じ席を禁止」は生徒ごとに禁止される席が違い入れ替えられないため、
+     その条件を使うときはまとめない。 */
+  const groupable=!opt.noPrev;
+  const candKey=v=>v==null?"_":(groupable&&!ng.has(v))?("g"+gender.get(v)):("u"+v);
 
   function bt(k,rest){
     if(++nodes>LIMIT)return"limit";
@@ -2922,7 +2997,8 @@ function solve(t,c,opt){
     const seen=new Set();
     for(let x=0;x<rest.length;x++){
       const v=rest[x];
-      if(seen.has(v))continue; seen.add(v);
+      const key=candKey(v);
+      if(seen.has(key))continue; seen.add(key);
       assign[i]=v;
       if(fits(i,v,false)){
         const r=bt(k+1,rest.slice(0,x).concat(rest.slice(x+1)));
@@ -2932,7 +3008,16 @@ function solve(t,c,opt){
     }
     return false;
   }
-  const r=bt(0,items);
+
+  /* 打ち切りは並び順の運に左右されるため、並べ直して数回やり直す。
+     解が出た場合と「解なし」と確定した場合はその時点で終える。 */
+  let r=false;
+  for(let attempt=0;attempt<ATTEMPTS;attempt++){
+    for(const i of openIdx)assign[i]=undefined;
+    nodes=0;
+    r=bt(0,shuffle(pool.concat(new Array(blanks).fill(null))));
+    if(r!=="limit")break;
+  }
   if(r!==true){
     const causes=[];
     if((c.ngPairs||t.ngPairs||[]).length)causes.push("NGペアが多すぎて、隣り合わせを避けられません");
@@ -3224,7 +3309,10 @@ async function boot(){
     }
 
     await store.load();
+    // β版のあいだは、初回だけお試し用のサンプルを用意する
+    const seeded=AUTH.signedIn()&&ensureSampleTemplate();
     render();
+    if(seeded)toast("お試し用のサンプルを1つ用意しました（不要なら削除できます）");
 
     if(AUTH.signedIn()&&SYNC.available()){
       // ログイン直後はSupabaseからGoogleのトークンを受け取っているため確認画面は出ない
