@@ -2110,6 +2110,15 @@ function applyRosterRows(rows,t,draw){
   }
 
   function commit(){
+    // ふりがな欄に漢字や英字が入っていると、ローマ字が空のまま取り込まれ、
+    // 座席表に氏名だけが並ぶ。列の対応がずれている可能性が高いので知らせる。
+    const noRomaji=out.filter(s=>s.kana&&!s.romaji).length;
+    if(noRomaji>0&&noRomaji>=out.length/2){
+      dlgError("ふりがなの列をご確認ください",[
+        `${out.length}名中${noRomaji}名で、ふりがなからローマ字を作れませんでした`,
+        "「ふりがな」の列に、ひらがな・カタカナ以外（漢字や英字）が入っていませんか",
+        "列の対応が正しい場合は、このまま名簿のローマ字欄を直接編集できます"]);
+    }
     t.roster=out;
     purgeMissingStudents(t);
     store.save(t);draw();toast(`${out.length}名を読み込みました`);
@@ -2950,7 +2959,10 @@ function solve(t,c,opt){
      将来、視力配慮・支援配慮・仲良しペア等を追加する場合は、
      seat.tags / roster側のタグ等を見る述語をこのリストに1つ足すだけでよい。 */
   const SEAT_CONSTRAINTS=[   // その席単体で決まる制約（④）
-    {name:"前回と同じ席禁止",ok:(i,no)=>!(opt.noPrev&&opt.prev&&opt.prev.assign[seats[i].id]===no)},
+    // 固定席は①で、この条件は④。上位の①が優先されるため、固定した席には④を適用しない。
+    // （毎回同じ席に固定している生徒がいると、④を選んだ瞬間に全体が失敗してしまう）
+    {name:"前回と同じ席禁止",
+     ok:(i,no)=>isFixedIdx(i)||!(opt.noPrev&&opt.prev&&opt.prev.assign[seats[i].id]===no)},
   ];
   const PAIR_CONSTRAINTS=[   // 隣接する2席の関係で決まる制約（③⑤）
     {name:"NGペア",ok:(no,other)=>!ng.get(no)?.has(other)},
@@ -2973,9 +2985,32 @@ function solve(t,c,opt){
   const fixedIdx=new Set();seats.forEach((s,i)=>{if(assign[i]!==undefined)fixedIdx.add(i)});
   function isFixedIdx(i){return fixedIdx.has(i)}
 
+  /* 違反している条件の名前を返す（問題なければ null）。
+     「条件に違反しています」とだけ伝えても直しようがないため、
+     どの条件で・誰が・どの席かまで示す。 */
+  function conflictOf(i,no){
+    for(const c of SEAT_CONSTRAINTS) if(!c.ok(i,no))return c.name;
+    for(const{i:j,lr}of NB[i]){
+      const other=assign[j];
+      if(other===undefined||other===null)continue;
+      for(const c of PAIR_CONSTRAINTS){
+        if(c.lrOnly&&!lr)continue;
+        if(!c.ok(no,other))return c.name;
+      }
+    }
+    return null;
+  }
+  const nameOfNo=no=>roster.find(s=>s.no===no)?.name??`#${no}`;
+
   // ①② 固定どうしがすでに条件へ違反していないか検査
-  for(let i=0;i<seats.length;i++) if(assign[i]!==undefined&&!fits(i,assign[i],true))
-    return{ok:false,causes:["固定席どうしが条件に違反しています（NGペアが隣接、または男女交互が成立しない）","固定席の位置を見直してください"]};
+  for(let i=0;i<seats.length;i++){
+    if(assign[i]===undefined)continue;
+    const why=conflictOf(i,assign[i]);
+    if(why)return{ok:false,causes:[
+      `固定した座席が「${why}」の条件に違反しています`,
+      `${nameOfNo(assign[i])}さん（前から${seats[i].row+1}列目・${seats[i].col+1}番）の固定内容を見直してください`,
+      "「固定席・NGペア」タブから固定を解除するか、席を変更できます"]};
+  }
 
   // ⑥ 残りをランダムに（バックトラッキング）
   const order=openIdx.slice();          // 行優先＝左と上が確定済みになり枝刈りが効く
