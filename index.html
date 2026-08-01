@@ -2199,6 +2199,10 @@ function dlgError(title,causes){
 }
 
 /* --- 座席レイアウト編集 --- */
+/* 列数・行数の上限。これを超えると座席が小さくなりすぎて印刷しても読めない。
+   「再生成」の入力欄と「＋前」「＋後」の両方で同じ上限を使う。 */
+const GRID_MAX=12;
+
 function paneLayout(t){
   const L=t.layout;
   const rerender=()=>{store.save(t);go({})};
@@ -2212,6 +2216,13 @@ function paneLayout(t){
     }
     L.cols=cols;L.rows=rows;L.seats=out;rerender();
   }
+  /* 行を増やしてよいか。上限に達していたら知らせて増やさない
+     （「再生成」は12までなのに、こちらは何行でも増やせてしまう状態だった） */
+  function canAddRow(){
+    if(L.rows<GRID_MAX)return true;
+    toast(`行数は${GRID_MAX}行までです。これ以上増やすと座席が小さくなりすぎます`);
+    return false;
+  }
   function addRowTop(){
     L.seats.forEach(s=>s.row++);
     for(let c=0;c<L.cols;c++)L.seats.push({id:uid("s"),row:0,col:c,enabled:false,tags:[]});
@@ -2224,10 +2235,12 @@ function paneLayout(t){
   const at=(r,c)=>L.seats.find(s=>s.row===r&&s.col===c);
   function addFront(c){
     for(let r=0;r<L.rows;r++){const s=at(r,c);if(s&&!s.enabled){s.enabled=true;return rerender()}}
+    if(!canAddRow())return;
     addRowTop();at(0,c).enabled=true;rerender();
   }
   function addBack(c){
     for(let r=L.rows-1;r>=0;r--){const s=at(r,c);if(s&&!s.enabled){s.enabled=true;return rerender()}}
+    if(!canAddRow())return;
     addRowBottom();at(L.rows-1,c).enabled=true;rerender();
   }
 
@@ -2253,19 +2266,19 @@ function paneLayout(t){
   for(let c=0;c<L.cols;c++) g.append(el("button",{class:"btn btn-sm",title:`${c+1}列目の最後尾に1席追加`,
     style:{minHeight:"26px",padding:"0",fontSize:"11px"},onclick:()=>addBack(c)},"＋後"));
 
-  const colsIn=el("input",{class:"input",type:"number",min:"1",max:"12",value:L.cols});
-  const rowsIn=el("input",{class:"input",type:"number",min:"1",max:"12",value:L.rows});
+  const colsIn=el("input",{class:"input",type:"number",min:"1",max:String(GRID_MAX),value:L.cols});
+  const rowsIn=el("input",{class:"input",type:"number",min:"1",max:String(GRID_MAX),value:L.rows});
 
   return el("div",{class:"panel"},
     el("div",{class:"box"},
       el("h3",{text:"① 基本レイアウト"}),
-      el("p",{class:"hint",text:"列数・行数を決めると座席グリッドを自動生成します。"}),
+      el("p",{class:"hint",text:`列数・行数を決めると座席グリッドを自動生成します（各${GRID_MAX}まで）。`}),
       el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:"12px",alignItems:"end"}},
         el("label",{class:"field",style:{marginBottom:"0"}},el("span",{text:"列数（横）"}),colsIn),
         el("label",{class:"field",style:{marginBottom:"0"}},el("span",{text:"行数（縦）"}),rowsIn),
         el("button",{class:"btn",onclick:()=>regrid(
-          Math.min(12,Math.max(1,+colsIn.value||L.cols)),
-          Math.min(12,Math.max(1,+rowsIn.value||L.rows)))},"再生成")),
+          Math.min(GRID_MAX,Math.max(1,+colsIn.value||L.cols)),
+          Math.min(GRID_MAX,Math.max(1,+rowsIn.value||L.rows)))},"再生成")),
       el("div",{class:"note",style:{marginTop:"14px"},
         text:"再生成しても、すでに削除した席の状態はできる限り引き継ぎます。"}),
       el("h3",{style:{marginTop:"22px"},text:"③ 保存と反映"}),
