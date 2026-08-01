@@ -1769,7 +1769,30 @@ function previewSheet(t){
 /* --- 名簿管理 --- */
 function paneRoster(t){
   const tbody=el("tbody");
+  // すでに重複した出席番号を持ってしまっている名簿を、その場で直せるようにする
+  const dupBox=el("div",{style:{display:"none"}});
+  const drawDup=()=>{
+    const dups=duplicateNos(t.roster);
+    dupBox.innerHTML="";
+    dupBox.style.display=dups.length?"":"none";
+    if(!dups.length)return;
+    dupBox.append(el("div",{class:"alert"},
+      el("h4",{text:`出席番号が重複しています（${dups.join("、")}）`}),
+      el("div",{text:"同じ番号の生徒がいると、片方は座席に名前が表示されず、ランダム配置でも席に着けません。"}),
+      el("button",{class:"btn",style:{marginTop:"10px"},onclick:()=>{
+        modal({title:"出席番号を振り直しますか？",
+          desc:"いまの並び順のまま 1 から振り直します。",
+          body:el("div",{class:"note",text:"番号が変わるため、既存の座席表の配置・固定席・NGペアは解除されます。"}),
+          footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
+            el("button",{class:"btn btn-primary",onclick:()=>{
+              t.roster=renumberRoster(t.roster);
+              purgeMissingStudents(t);
+              store.save(t);closeModal();draw();toast("出席番号を振り直しました");
+            }},"振り直す")]});
+      }},"出席番号を振り直す")));
+  };
   const draw=()=>{
+    drawDup();
     tbody.innerHTML="";
     t.roster.forEach(s=>tbody.append(el("tr",{},
       el("td",{class:"num",text:s.no}),
@@ -1812,11 +1835,32 @@ function paneRoster(t){
         el("h3",{text:"名簿"}),
         el("span",{class:"num",style:{fontSize:"12.5px",color:"var(--ink3)"},
           text:`${t.roster.length}名（男 ${t.roster.filter(s=>s.gender==="m").length} / 女 ${t.roster.filter(s=>s.gender==="f").length}）`})),
+      dupBox,
       el("div",{class:"scroller"},
         el("table",{class:"tbl"},
           el("thead",{},el("tr",{},...["番号","氏名","ふりがな","ローマ字","性別",""].map(h=>el("th",{text:h})))),
           tbody))));
 }
+/* ---------------- 出席番号の重複 ----------------
+   出席番号は座席への配置（c.assign）から生徒を引くための鍵になっている。
+   重複すると roster.find(x=>x.no===no) が常に先頭の1件しか返さないため、
+   もう一方の生徒は座席に名前が出ず、ランダム配置でも席に着けない。
+   画面から番号を直す手段がないので、重複そのものを作らせない。 */
+function duplicateNos(roster){
+  const count=new Map();
+  (roster||[]).forEach(s=>count.set(s.no,(count.get(s.no)||0)+1));
+  return [...count.entries()].filter(([,n])=>n>1).map(([no])=>no);
+}
+/* 名簿の並び順のまま 1,2,3… へ振り直す */
+function renumberRoster(roster){
+  return (roster||[]).map((s,i)=>({...s,no:i+1}));
+}
+/* 次に使う出席番号。件数ではなく最大値+1にしないと、
+   途中の生徒を削除してから追加したときに既存の番号とぶつかる。 */
+function nextRosterNo(roster){
+  return (roster||[]).reduce((m,s)=>Math.max(m,Number(s.no)||0),0)+1;
+}
+
 /* ---------------- CSV パーサ（引用符・カンマ・改行入りセル対応） ---------------- */
 function parseCSV(text){
   const rows=[];let row=[],field="",inQ=false;
@@ -1936,7 +1980,7 @@ function applyRosterRows(rows,t,draw){
   const iNo=idx("番号"),iNm=idx("氏名"),iKn=idx("ふりがな"),iGd=idx("性別"),iRj=idx("ローマ字");
   if([iNo,iNm,iKn,iGd].some(i=>i<0))
     return dlgError("名簿を読み込めませんでした",["必須列が見つかりません：番号・氏名・ふりがな・性別","1行目を見出し行にしてください"]);
-  const out=[];
+  let out=[];
   rows.slice(1).forEach(r=>{
     const name=String(r[iNm]??"").trim(); if(!name)return;
     const kana=String(r[iKn]??"").trim();
@@ -1946,6 +1990,27 @@ function applyRosterRows(rows,t,draw){
   });
   if(!out.length)return dlgError("名簿を読み込めませんでした",["データ行がありません"]);
 
+  // 出席番号が重複したままだと、片方の生徒が座席に表示されず配置もできない。
+  // 黙って取り込まず、振り直すかどうかを確認する。
+  const dups=duplicateNos(out);
+  if(dups.length){
+    modal({title:"出席番号が重複しています",
+      desc:`重複している番号：${dups.join("、")}`,
+      body:el("div",{},
+        el("div",{class:"alert"},
+          el("h4",{text:"このままでは正しく使えません"}),
+          el("div",{text:"出席番号が同じ生徒がいると、片方の生徒は座席に名前が表示されず、ランダム配置でも席に着けません。"})),
+        el("p",{style:{marginTop:"12px",fontSize:"13px",color:"var(--ink2)",lineHeight:"1.7"},
+          text:"名簿の並び順のまま 1 から振り直して読み込むか、元のファイルの番号を直してから読み込み直してください。"})),
+      footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
+        el("button",{class:"btn btn-primary",onclick:()=>{
+          closeModal(); out=renumberRoster(out); askSwap();
+        }},"番号を振り直して読み込む")]});
+    return;
+  }
+  askSwap();
+
+  function askSwap(){
   // 名簿を入れ替えると、既存の座席表の配置や固定席・NGペアが「存在しない生徒番号」を
   // 指したままになる。黙って壊さず、影響を数えて確認をとってから掃除する。
   const impact=rosterSwapImpact(t,out);
@@ -1963,6 +2028,7 @@ function applyRosterRows(rows,t,draw){
         text:"新しい名簿にも同じ出席番号の生徒がいる場合、その席はそのまま残ります。"})),
     footer:[el("button",{class:"btn",onclick:closeModal},"やめる"),
       el("button",{class:"btn btn-primary",onclick:()=>{closeModal();commit()}},"入れ替える")]});
+  }
 
   function commit(){
     t.roster=out;
@@ -2031,7 +2097,7 @@ function dlgAddStudent(t,draw){
     footer:[el("button",{class:"btn",onclick:closeModal},"キャンセル"),
       el("button",{class:"btn btn-primary",onclick:()=>{
         if(!nm.value.trim())return nm.focus();
-        t.roster.push({no:t.roster.length+1,name:nm.value.trim(),kana:kn.value.trim(),
+        t.roster.push({no:nextRosterNo(t.roster),name:nm.value.trim(),kana:kn.value.trim(),
           romaji:rj.value.trim()||toRomaji(kn.value),gender:gd.value});
         store.save(t);draw();closeModal();toast("追加しました");
       }},"追加する")]});
@@ -2195,6 +2261,8 @@ function paneRules(t){
         el("div",{style:{overflowX:"auto"}},pickGrid),pickNote),
       el("button",{class:"btn btn-primary",style:{marginTop:"12px",marginBottom:"16px"},onclick:()=>{
         const no=+fS.value,sid=pickedSeatId;
+        // 名簿が空だと選択肢が無く、value が "" のまま 0 番で登録されてしまう
+        if(!t.roster.length)return toast("先に「名簿管理」で生徒を登録してください");
         if(!sid)return toast("座席を選んでください");
         if(t.fixedSeats.some(f=>f.no===no||f.seatId===sid))return toast("すでに固定されています");
         t.fixedSeats.push({no,seatId:sid});store.save(t);drawFix();drawPicker();toast("固定しました");
@@ -2208,6 +2276,7 @@ function paneRules(t){
         el("label",{class:"field",style:{marginBottom:0}},el("span",{text:"生徒 B"}),n2),
         el("button",{class:"btn btn-primary",onclick:()=>{
           const a=+n1.value,b=+n2.value;
+          if(t.roster.length<2)return toast("先に「名簿管理」で生徒を2名以上登録してください");
           if(a===b)return toast("同じ生徒は登録できません");
           if(t.ngPairs.some(p=>p.includes(a)&&p.includes(b)))return toast("すでに登録されています");
           t.ngPairs.push([a,b]);store.save(t);drawNg();toast("NGペアを登録しました");
