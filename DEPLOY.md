@@ -171,7 +171,6 @@ const APP_CONFIG={
   supabaseUrl:"https://xxxx.supabase.co",
   supabaseAnonKey:"eyJhbGciOi...",
   googleClientId:"xxxx.apps.googleusercontent.com",
-  corporateContactUrl:"",
   supportEmail:"あなたの連絡先@example.com",
   premiumPriceLabel:"500円 / 年",
   termsUrl:"./terms.html",

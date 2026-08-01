@@ -322,7 +322,6 @@ table.tbl tr:hover td{background:#f8fafd}
 .login-hint code,.alert code,.note code{font-family:var(--mono);font-size:.92em;background:#eef1f6;padding:1px 4px;border-radius:3px}
 .login-legal{margin-top:14px;font-size:11.5px;color:var(--ink3);text-align:center;line-height:1.7}
 .login-legal .link{font-size:11.5px}
-.login-foot{margin-top:20px;padding-top:16px;border-top:1px solid var(--line2);text-align:center}
 /* Googleログインボタン（公式ガイドラインに沿った白背景＋Gマーク） */
 .gbtn{
   display:flex;align-items:center;justify-content:center;gap:11px;width:100%;
@@ -507,9 +506,6 @@ const APP_CONFIG={
   // ・「ライブラリ」で Google Drive API を有効化
   // ・OAuth同意画面のスコープに .../auth/drive.appdata を追加
   googleClientId:"189688689872-od7in4bdj6rngnpd7vjo48leu2b1ahc4.apps.googleusercontent.com",
-
-  // 法人契約の問い合わせ先（お問い合わせフォームのURLなど）
-  corporateContactUrl:"",
 
   // 問い合わせ先メールアドレス
   supportEmail:"kenjunioriron@gmail.com",
@@ -1377,26 +1373,7 @@ function viewLogin(){
           text:"座席表の作成・編集・印刷に制限はありません。データはお使いの端末に保存されます。"})):null,
       notice,
       gbtn,
-      legal,
-      el("div",{class:"login-foot"},
-        APP_CONFIG.corporateContactUrl
-          ? el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約はこちら")
-          : el("button",{class:"link",onclick:dlgCorporate},"法人契約はこちら"))));
-}
-
-function dlgCorporate(){
-  modal({title:"法人契約について",
-    desc:"学校・自治体単位でのご利用をご検討の場合はこちらからご相談ください。",
-    body:el("div",{},
-      el("div",{class:"note",text:"学校単位・教育委員会単位でのお申し込み、請求書でのお支払い、名簿の一括登録などに対応します。"}),
-      el("ul",{style:{margin:"12px 0 0 18px",lineHeight:"1.8",fontSize:"13.5px"}},
-        el("li",{text:"ご利用人数・学校数に応じたお見積り"}),
-        el("li",{text:"請求書・見積書の発行"}),
-        el("li",{text:"導入時の設定サポート"})),
-      el("p",{style:{marginTop:"14px",fontSize:"13.5px",lineHeight:"1.7"}},
-        "ご相談は、Googleアカウントでログイン（無料会員のままで構いません）後、"+
-        "画面右上の設定アイコン（⚙）→「お問い合わせ」から、種別で「法人契約について」を選んで送信してください。")),
-    footer:[el("button",{class:"btn btn-primary",onclick:closeModal},"閉じる")]});
+      legal));
 }
 
 /* =====================================================================
@@ -1568,11 +1545,6 @@ function dlgContact(presetCategory){
       counter,
       el("p",{style:{marginTop:"10px",fontSize:"12px",color:"var(--ink3)",lineHeight:"1.7"},
         text:"ご利用のブラウザ情報が一緒に送信されます。生徒の名簿の内容が送信されることはありません。"}),
-      APP_CONFIG.corporateContactUrl
-        ? el("p",{style:{marginTop:"10px",fontSize:"13.5px"}},
-            el("a",{class:"link",href:APP_CONFIG.corporateContactUrl,target:"_blank",rel:"noopener noreferrer"},"法人契約のご相談はこちら"))
-        : el("p",{style:{marginTop:"10px",fontSize:"13.5px"}},
-            el("button",{class:"link",onclick:()=>{cat.value="法人契約について";cat.focus()}},"法人契約のご相談はこちら")),
       errBox),
     footer:[el("button",{class:"btn",onclick:closeModal},"閉じる"),send]});
 }
