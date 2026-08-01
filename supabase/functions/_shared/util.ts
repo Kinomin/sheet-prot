@@ -108,7 +108,12 @@ export async function db(
 
 export async function getProfile(userId: string): Promise<Record<string, unknown> | null> {
   const res = await db(`profiles?id=eq.${userId}&select=*`);
-  if (!res.ok) throw new Error("会員情報を取得できませんでした");
+  if (!res.ok) {
+    // ステータスと応答本文をログへ残す。原因（テーブル未作成・権限不足・キー不一致など）を
+    // 握りつぶすと、利用者にも開発者にも「なぜ」が分からなくなるため。
+    const body = await res.text().catch(() => "");
+    throw new Error(`会員情報を取得できませんでした (${res.status}): ${body.slice(0, 300)}`);
+  }
   const rows = await res.json();
   return rows[0] ?? null;
 }
