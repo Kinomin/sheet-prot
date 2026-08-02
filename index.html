@@ -1361,8 +1361,30 @@ function consumeCheckoutReturn(){
 }
 
 /* ---------------- ルーター ---------------- */
+/* ブラウザの「戻る」でアプリの外へ出てしまわないよう、画面遷移をhistoryに積む。
+   view/tplId/chartIdが変わる遷移（別の画面に移る操作）だけpushStateし、
+   タブ切り替えなど同じ画面内の変更はreplaceStateに留める
+   （タブを開くたびに履歴が積み上がって「戻る」が使いづらくなるのを防ぐため）。 */
 const R={view:"home", tplId:null, chartId:null, tab:"basic", q:""};
-function go(patch){Object.assign(R,patch);render()}
+function go(patch){
+  const navChange=["view","tplId","chartId"].some(k=>k in patch&&patch[k]!==R[k]);
+  Object.assign(R,patch);
+  const state={...R};
+  if(navChange)history.pushState(state,"");
+  else history.replaceState(state,"");
+  render();
+}
+/* boot()の最後（ログイン処理でのURL書き換えがすべて終わったあと）に一度だけ呼ぶ。
+   ここでpopstateを拾って、戻る/進むのたびにRへ復元してから再描画する。 */
+function initRouter(){
+  history.replaceState({...R},"");
+  window.addEventListener("popstate",e=>{
+    if(!e.state)return;                 // 履歴の外（アプリ起動前）まで戻った場合はブラウザに任せる
+    Object.assign(R,e.state);
+    closeModal();
+    render();
+  });
+}
 
 /* ---------------- トースト / モーダル ---------------- */
 let toastT;
@@ -3614,6 +3636,7 @@ async function boot(){
   }
 
   if(checkout)await settleCheckoutReturn(checkout);
+  initRouter();
 }
 boot();
 </script>
