@@ -2399,8 +2399,13 @@ function paneRules(t){
         // 名簿が空だと選択肢が無く、value が "" のまま 0 番で登録されてしまう
         if(!t.roster.length)return toast("先に「名簿管理」で生徒を登録してください");
         if(!sid)return toast("座席を選んでください");
-        if(t.fixedSeats.some(f=>f.no===no||f.seatId===sid))return toast("すでに固定されています");
-        setFixedEverywhere(t,sid,no,true);store.save(t);drawFix();drawPicker();toast("固定しました");
+        // 同じ生徒・同じ席の組み合わせがすでに登録済みの場合は、ブロックせずに
+        // setFixedEverywhere()を再実行して座席への配置を直す（過去の不具合等で
+        // 固定マークだけあって実際は座っていない状態を、ここでも自己修復できるようにする）。
+        const dup=t.fixedSeats.find(f=>f.no===no||f.seatId===sid);
+        if(dup&&!(dup.no===no&&dup.seatId===sid))return toast("すでに固定されています");
+        setFixedEverywhere(t,sid,no,true);store.save(t);drawFix();drawPicker();
+        toast(dup?"固定と配置を直しました":"固定しました");
       }},"固定する"),
       fixList),
     el("div",{class:"box"},
@@ -2570,6 +2575,18 @@ function viewEditor(){
   return el("div",{class:"ed"},bar,el("div",{class:"ed-body",id:"edbody"}));
 }
 
+/* c.fixedSeatsに登録があるのに、実際にはその席に座っていないケースを開くたびに直す。
+   過去の不具合や他端末との同期タイミングでずれても、「固定＝必ずその席に座っている」を
+   画面を開けば常に保証できるようにするための最終防衛線。 */
+function reconcileFixedSeats(c){
+  let changed=false;
+  (c.fixedSeats||[]).forEach(f=>{
+    if(c.assign[f.seatId]===f.no)return;
+    for(const[sid,n2]of Object.entries(c.assign))if(n2===f.no)delete c.assign[sid];
+    c.assign[f.seatId]=f.no;changed=true;
+  });
+  return changed;
+}
 function renderEditorBody(){
   const host=$("#edbody"); if(!host)return go({});
   // 他の端末での削除が同期で届いた場合など、開いていた座席表が途中で無くなることがある。
@@ -2581,6 +2598,7 @@ function renderEditorBody(){
                                 :{view:"home",tplId:null,chartId:null});
   }
   const{t,c}=k;
+  if(reconcileFixedSeats(c))store.save(t);
   host.className="ed-body mode-"+E.mode;
   host.innerHTML="";
   host.append(sheetPane(t,c),cardPane(t,c));
