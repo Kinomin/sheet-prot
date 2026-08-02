@@ -2482,7 +2482,8 @@ function ctx(){
 function snapNow(){
   const k=ctx(); if(!k)return null;
   return{assign:clone(k.c.assign),room:clone(k.c.room),
-         fixed:clone(k.c.fixedSeats),tplFixed:clone(k.t.fixedSeats)};
+         fixed:clone(k.c.fixedSeats),tplFixed:clone(k.t.fixedSeats),
+         manualSeats:clone(k.c.manualSeats||[])};
 }
 function pushUndo(label){
   const s=snapNow(); if(!s)return;
@@ -2494,6 +2495,7 @@ function applySnap(s){
   const k=ctx(); if(!k||!s)return;
   k.c.assign=clone(s.assign);k.c.room=clone(s.room);k.c.fixedSeats=clone(s.fixed);
   if(s.tplFixed)k.t.fixedSeats=clone(s.tplFixed);
+  k.c.manualSeats=clone(s.manualSeats||[]);
 }
 function doUndo(){
   if(!E.undo.length)return toast("これ以上戻せません");
@@ -2621,6 +2623,27 @@ function fitSheet(){
   avoidRoomOverlaps();
 }
 
+/* 「漢字4文字ぶんの幅 ÷ フォントサイズ」を実測して返す。
+   氏名の基準サイズを“文字数”ではなく“幅”で決めるために使う——文字数基準だと、
+   英字や半角カナのように1文字が細い氏名で基準を超えて極端に大きくなってしまう
+   （例：「Ai」だけ「田中結衣」の倍以上の大きさになる）。
+   この比率は書体だけで決まり座席の大きさには依らないため、一度だけ測って使い回す
+   （毎回測ると、そのたびにブラウザの再計算が余分に1回増えて遅くなる）。 */
+let _cjk4Ratio=0;
+function cjk4Ratio(){
+  if(_cjk4Ratio)return _cjk4Ratio;
+  const seat=document.querySelector(".seat:not(.off)"); if(!seat)return 0;
+  const REF=120;
+  const probe=el("span",{class:"sname",text:"漢漢漢漢",style:{
+    fontSize:REF+"px",position:"absolute",visibility:"hidden",
+    maxWidth:"none",whiteSpace:"nowrap"}});
+  seat.append(probe);
+  const w=probe.scrollWidth;
+  probe.remove();
+  if(w>0)_cjk4Ratio=w/REF;
+  return _cjk4Ratio;
+}
+
 /* 氏名・ローマ字が座席内に収まるよう自動縮小する（画面編集・印刷とも共通）。
    氏名は「漢字4文字」を基準の大きさとする——列数などから決め打ちの倍率で
    決めるのではなく、その席の実際の横幅から「4文字ならこの大きさ」を逆算する。
@@ -2641,23 +2664,23 @@ function fitSeatNames(){
     if(nameEl&&text.length)nameEl.style.fontSize=REF+"px";
     items.push({seat,nameEl,subEl,text});
   });
+  const ratio=cjk4Ratio();   // 漢字4文字ぶんの幅 ÷ フォントサイズ
   items.forEach(it=>{
     it.avail=Math.max(1,it.seat.clientWidth-1);
     if(it.subEl)it.subW=it.subEl.scrollWidth;
-    if(it.nameEl&&it.text.length)it.perChar=it.nameEl.scrollWidth/it.text.length;
+    if(it.nameEl&&it.text.length)it.nameW=it.nameEl.scrollWidth;
   });
   items.forEach(it=>{
     if(it.subEl&&it.subW>it.avail&&it.subW>0){
       const base=parseFloat(getComputedStyle(it.subEl).fontSize);
       it.subEl.style.fontSize=(base*Math.max(0.45,it.avail/it.subW))+"px";
     }
-    if(!it.nameEl||!it.text.length)return;
-    // 大きめの基準フォントで実際の1文字あたりの幅を測り、そこから
-    // 「席の余白を除いた幅に4文字がぴったり収まる大きさ」を逆算する
-    // （文字幅はフォントサイズに比例するため、1回の計測で正確に求まる）。
-    const base4=REF*it.avail/(it.perChar*4);
-    const font=it.text.length<=4?base4:base4*(4/it.text.length);
-    it.nameEl.style.fontSize=Math.max(4,font)+"px";
+    if(!it.nameEl||!it.text.length||!it.nameW)return;
+    // 基準：漢字4文字が席の幅にちょうど収まる大きさ。1〜3文字でもこれ以上は大きくしない。
+    // 実際の氏名がこの幅を超える場合だけ、席の幅に収まるところまで縮める。
+    const base4=ratio>0?it.avail/ratio:Infinity;
+    const fitW=REF*it.avail/it.nameW;
+    it.nameEl.style.fontSize=Math.max(4,Math.min(base4,fitW))+"px";
   });
   // 番号バッジ（左上・絶対配置）と実際に重なっていないかをDOM上で直接確認し、
   // 重なっていればそれが解消するまで追加で縮める（席が小さく氏名が大きい場合の保険。
@@ -2817,6 +2840,7 @@ function seatEl(s,t,c,teacher){
       const a=E.sel,b=s.id,va=c.assign[a],vb=c.assign[b];
       if(vb==null)delete c.assign[a];else c.assign[a]=vb;
       if(va==null)delete c.assign[b];else c.assign[b]=va;
+      markManual(c,a,b);
       E.sel=null;store.save(t);renderEditorBody();
       const f=document.querySelector(`[data-seat="${b}"]`);f&&f.classList.add("flash");
       toast("席を交換しました");
@@ -2861,14 +2885,17 @@ function placeStudent(p,seat,t,c){
   commit();
   function commit(){
     pushUndo("生徒の配置");
+    const touched=[seat.id];
     if(p.from){ // 席から席へ
       const other=c.assign[seat.id];
       delete c.assign[p.from];
       if(other!=null)c.assign[p.from]=other;   // 入れ替え
+      touched.push(p.from);
     }
     // 名前カードからの配置：元の席にいたら外す
-    for(const[sid,no]of Object.entries(c.assign)) if(no===p.no&&sid!==p.from)delete c.assign[sid];
+    for(const[sid,no]of Object.entries(c.assign)) if(no===p.no&&sid!==p.from){delete c.assign[sid];touched.push(sid)}
     c.assign[seat.id]=p.no;
+    markManual(c,...touched);
     store.save(t);renderEditorBody();
     const f=document.querySelector(`[data-seat="${seat.id}"]`);f&&f.classList.add("flash");
   }
@@ -2903,6 +2930,7 @@ function dlgSeatMenu(s,st,t,c){
       }},isFixed?"固定を解除":"この席を固定する"),
       el("button",{class:"btn btn-danger",onclick:()=>{
         pushUndo("座席から外す");delete c.assign[s.id];
+        markManual(c,s.id);   // 空になったので手動配置の記録からも外す
         setSeatFixed(t,c,s.id,st.no,false);
         store.save(t);closeModal();renderEditorBody();toast("名前カード一覧へ戻しました");
       }},"席から外す")]});
@@ -2954,12 +2982,25 @@ function cardPane(t,c){
 /* =====================================================================
    ランダム配置
    ===================================================================== */
-/* 固定席ではないが、すでに座席へ配置済みの生徒（＝手動で置いた分）。
-   ランダム配置でこの配置を残すかどうかを選べるようにするための一覧。 */
+/* 利用者が自分でドラッグ・交換して置いた座席（＝手動配置）を記録する。
+   c.assign に入っているだけでは「手動で置いた」とは言えない——見本の座席表や
+   前回のランダム配置の結果も入っているため、それらまで手動扱いすると
+   ランダム配置が「全部そのまま」になって何も起きなくなる。 */
+function markManual(c,...seatIds){
+  const s=new Set(c.manualSeats||[]);
+  seatIds.forEach(id=>{ if(id==null)return;
+    if(c.assign[id]!=null)s.add(id); else s.delete(id) });   // 空になった席は手動扱いを外す
+  c.manualSeats=[...s];
+}
+
+/* 固定席ではないが、利用者が手動で置いた生徒の一覧。
+   ランダム配置でこの配置を残すかどうかを選べるようにするために使う。
+   c.assign と突き合わせるので、名簿から消えた生徒や削除された座席は自然に外れる。 */
 function manualAssignments(c){
   const fixedSeatIds=new Set((c.fixedSeats||[]).map(f=>f.seatId));
+  const manual=new Set(c.manualSeats||[]);
   return Object.entries(c.assign||{})
-    .filter(([sid])=>!fixedSeatIds.has(sid))
+    .filter(([sid])=>manual.has(sid)&&!fixedSeatIds.has(sid))
     .map(([seatId,no])=>({seatId,no}));
 }
 
@@ -3019,7 +3060,12 @@ function dlgRandom(t,c){
         const res=solve(t,c,{gender:cbGender.checked,noPrev:cbPrev.checked&&!!prev,prev,keepSeats});
         if(!res.ok){closeModal();return dlgError("条件を満たす座席配置を作成できませんでした",res.causes)}
         pushUndo("ランダム配置");
-        c.assign=res.assign;store.save(t);closeModal();renderEditorBody();
+        c.assign=res.assign;
+        // ランダムで決め直した席は「手動で置いた席」ではなくなる。
+        // 残す指定をした席だけを手動配置として引き継ぐ（そうしないと次にランダム配置を
+        // 開いたとき、全員が手動配置扱いになって何も動かせなくなる）。
+        c.manualSeats=keepSeats.map(f=>f.seatId);
+        store.save(t);closeModal();renderEditorBody();
         toast("ランダム配置しました");
       }},"この条件で配置する")]});
 }
