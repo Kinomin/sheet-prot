@@ -3355,7 +3355,13 @@ function doPrint(){
   const k=ctx(); if(!k)return; const{t}=k;
   let st=document.getElementById("pagecss");
   if(!st){st=el("style",{id:"pagecss"});document.head.append(st)}
-  st.textContent=`@page{size:${t.print.paper} ${t.print.orient};margin:8mm}`;
+  // @pageのsizeに"B5"という名前を渡すと、ブラウザはISO 216のB5（176×250mm）を
+  // 使ってしまう。日本の教員が使うB5用紙は通常JIS B5（182×257mm）で、
+  // 実際の座席・備品の配置計算（PAPER定数・fitSheet）もJIS B5で行っているため、
+  // 名前ではなく実寸（mm）を直接指定してズレが起きないようにする。
+  const d=PAPER[t.print.paper];
+  const wmm=t.print.orient==="landscape"?d.h:d.w, hmm=t.print.orient==="landscape"?d.w:d.h;
+  st.textContent=`@page{size:${wmm}mm ${hmm}mm;margin:8mm}`;
   FIT.print=true;fitSheet();
   setTimeout(()=>{window.print();FIT.print=false;requestAnimationFrame(fitSheet)},60);
 }
