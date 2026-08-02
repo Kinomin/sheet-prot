@@ -228,7 +228,7 @@ table.tbl tr:hover td{background:#f8fafd}
   padding-top:calc(var(--fs-sub,8px)*1.8 + 2px);
   transition:.1s;width:var(--cw);height:var(--ch);
 }
-.seat .sname{font-weight:700;font-size:var(--fs-name,14px);line-height:1.15;letter-spacing:-.01em;
+.seat .sname{font-weight:700;font-size:var(--fs-name,14px);line-height:1.15;letter-spacing:-.06em;
   white-space:nowrap;overflow:hidden;max-width:100%;display:inline-block}
 .seat .sromaji{font-family:var(--mono);font-size:var(--fs-sub,8px);color:#555;letter-spacing:.04em;margin-top:1px;
   white-space:nowrap;overflow:hidden;max-width:100%;display:inline-block}
@@ -2642,7 +2642,7 @@ function fitSeatNames(){
     items.push({seat,nameEl,subEl,text});
   });
   items.forEach(it=>{
-    it.avail=Math.max(1,it.seat.clientWidth-2);
+    it.avail=Math.max(1,it.seat.clientWidth-1);
     if(it.subEl)it.subW=it.subEl.scrollWidth;
     if(it.nameEl&&it.text.length)it.perChar=it.nameEl.scrollWidth/it.text.length;
   });
