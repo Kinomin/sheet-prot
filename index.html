@@ -2310,6 +2310,21 @@ function paneLayout(t){
 }
 
 /* --- 固定席・NGペア --- */
+/* このタブは特定の座席表(c)ではなくテンプレート(t)全体の画面なので、
+   t.fixedSeatsだけ書き換えると「座席表履歴」にある既存の座席表のc.fixedSeatsと食い違い、
+   すでに作成済みの座席表ではランダム配置・座席メニューの両方で固定が無視されてしまう
+   （solve()やdlgSeatMenuはc.fixedSeatsしか見ないため）。
+   ここで固定・解除した内容は、既存の全座席表にも同じ形で反映する。 */
+function setFixedEverywhere(t,seatId,no,fixed){
+  const drop=arr=>(arr||[]).filter(f=>f.seatId!==seatId&&f.no!==no);
+  t.fixedSeats=drop(t.fixedSeats);
+  if(fixed)t.fixedSeats.push({no,seatId});
+  (t.charts||[]).forEach(c=>{
+    if(!c.layout.seats.some(s=>s.id===seatId))return;   // このレイアウトに存在しない席は対象外
+    c.fixedSeats=drop(c.fixedSeats);
+    if(fixed)c.fixedSeats.push({no,seatId});
+  });
+}
 function paneRules(t){
   const seatLabel=id=>{const s=t.layout.seats.find(x=>x.id===id);
     return s?`前から${s.row+1}列目・${s.col+1}番`:"—"};
@@ -2325,7 +2340,7 @@ function paneRules(t){
       el("span",{style:{color:"var(--ink2)",fontSize:"13px"},text:"→ "+seatLabel(f.seatId)}),
       el("span",{class:"spacer",style:{flex:"1"}}),
       el("button",{class:"btn btn-sm btn-danger",onclick:()=>{
-        t.fixedSeats=t.fixedSeats.filter(x=>x!==f);store.save(t);drawFix();drawPicker()}},"解除"))));
+        setFixedEverywhere(t,f.seatId,f.no,false);store.save(t);drawFix();drawPicker()}},"解除"))));
   };drawFix();
 
   const ngList=el("div",{class:"hist"});
@@ -2379,7 +2394,7 @@ function paneRules(t){
         if(!t.roster.length)return toast("先に「名簿管理」で生徒を登録してください");
         if(!sid)return toast("座席を選んでください");
         if(t.fixedSeats.some(f=>f.no===no||f.seatId===sid))return toast("すでに固定されています");
-        t.fixedSeats.push({no,seatId:sid});store.save(t);drawFix();drawPicker();toast("固定しました");
+        setFixedEverywhere(t,sid,no,true);store.save(t);drawFix();drawPicker();toast("固定しました");
       }},"固定する"),
       fixList),
     el("div",{class:"box"},
