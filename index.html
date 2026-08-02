@@ -3209,9 +3209,11 @@ function dlgPrintPreview(){
   const homeParent=sheetEl.parentElement, homeNext=sheetEl.nextSibling;
 
   PRINT_PREVIEW_OPEN=true;
+  // プレビューの用紙が大きく表示されるほど氏名も大きく見えるため、
+  // タイトル・ボタンぶんを差し引いても収まる範囲で最大限まで枠を広くとる。
   const previewBox=el("div",{class:"print-preview",style:{
-    background:"#fff",borderRadius:"10px",padding:"18px",
-    maxHeight:"76vh",maxWidth:"92vw",overflow:"auto",
+    background:"#fff",borderRadius:"10px",padding:"14px",
+    maxHeight:"84vh",maxWidth:"95vw",overflow:"auto",
     display:"flex",justifyContent:"center",alignItems:"flex-start",
     boxShadow:"0 20px 60px -20px rgba(0,0,0,.5)"
   }});
@@ -3223,11 +3225,11 @@ function dlgPrintPreview(){
     el("button",{class:"btn btn-lg",onclick:()=>cancel()},"キャンセル"),
     okBtn,
     printQuotaNote());
-  const panel=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:"16px"}},
+  const panel=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:"10px"}},
     titleBar,previewBox,footer);
   const backdrop=el("div",{style:{
     position:"fixed",inset:"0",background:"rgba(22,29,41,.55)",
-    display:"flex",alignItems:"center",justifyContent:"center",zIndex:"90",padding:"24px"
+    display:"flex",alignItems:"center",justifyContent:"center",zIndex:"90",padding:"16px"
   }},panel);
   backdrop.addEventListener("click",e=>{if(e.target===backdrop)cancel()});
 
