@@ -3211,20 +3211,35 @@ function dlgPrintPreview(){
   PRINT_PREVIEW_OPEN=true;
   // プレビューの用紙が大きく表示されるほど氏名も大きく見えるため、
   // タイトル・ボタンぶんを差し引いても収まる範囲で最大限まで枠を広くとる。
+  // ただし84vh一杯まで使うと、画面の低いスマホではタイトルやボタン
+  // （スマホ向けの案内文を含む）がはみ出すため、その分（180px）は
+  // 必ず残すよう下限をcalc()で保証する。
   const previewBox=el("div",{class:"print-preview",style:{
     background:"#fff",borderRadius:"10px",padding:"14px",
-    maxHeight:"84vh",maxWidth:"95vw",overflow:"auto",
+    maxHeight:"min(84vh, calc(100vh - 180px))",maxWidth:"95vw",overflow:"auto",
     display:"flex",justifyContent:"center",alignItems:"flex-start",
     boxShadow:"0 20px 60px -20px rgba(0,0,0,.5)"
   }});
   const facingLabel=t.print.facing==="teacher"?"教員側":"生徒側";
+  const orientLabel=t.print.orient==="portrait"?"縦":"横";
   const titleBar=el("div",{style:{color:"#fff",fontWeight:"700",fontSize:"15px",textAlign:"center"}},
-    `印刷プレビュー　${t.print.paper}・${t.print.orient==="portrait"?"縦":"横"}・${facingLabel}`);
+    `印刷プレビュー　${t.print.paper}・${orientLabel}・${facingLabel}`);
+  // スマホ（特にiPhone）のシステム印刷画面は、このページが指定した用紙サイズ・
+  // 向きを反映せず、A4・縦向きなどの既定値で開くことがある。その場合に
+  // 手元でどう直せばよいかが分かるよう、狭い画面のときだけ案内を出す。
+  const mobileHint=window.matchMedia("(max-width:640px)").matches
+    ? el("div",{style:{color:"#e4e8f0",fontSize:"12px",width:"100%",textAlign:"center",lineHeight:"1.6",
+        background:"rgba(0,0,0,.35)",borderRadius:"8px",padding:"8px 10px"}},
+        `※ 印刷画面が縦向き・別サイズで開いた場合は、「用紙サイズ」「向き」の項目で`,
+        el("b",{text:`${t.print.paper}・${orientLabel}向き`}),
+        `に直してください`)
+    : null;
   const okBtn=el("button",{class:"btn btn-primary btn-lg",onclick:()=>confirmPrint(okBtn)},"はい、印刷する");
   const footer=el("div",{style:{display:"flex",gap:"10px",alignItems:"center",flexWrap:"wrap",justifyContent:"center"}},
     el("button",{class:"btn btn-lg",onclick:()=>cancel()},"キャンセル"),
     okBtn,
-    printQuotaNote());
+    printQuotaNote(),
+    mobileHint);
   const panel=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:"10px"}},
     titleBar,previewBox,footer);
   const backdrop=el("div",{style:{
