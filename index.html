@@ -2322,7 +2322,13 @@ function setFixedEverywhere(t,seatId,no,fixed){
   (t.charts||[]).forEach(c=>{
     if(!c.layout.seats.some(s=>s.id===seatId))return;   // このレイアウトに存在しない席は対象外
     c.fixedSeats=drop(c.fixedSeats);
-    if(fixed)c.fixedSeats.push({no,seatId});
+    if(fixed){
+      c.fixedSeats.push({no,seatId});
+      // 固定しただけでは席が空のままになってしまう（ドラッグ配置は固定席へ受け付けないため、
+      // ほかに手段がない）。固定＝①最優先という扱いに合わせ、ここで実際にも座らせる。
+      for(const[sid,n2]of Object.entries(c.assign))if(n2===no)delete c.assign[sid];
+      c.assign[seatId]=no;
+    }
   });
 }
 function paneRules(t){
