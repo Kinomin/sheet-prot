@@ -221,13 +221,20 @@ table.tbl tr:hover td{background:#f8fafd}
   border:1.5px solid var(--ink);border-radius:4px;background:#fff;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   position:relative;overflow:hidden;text-align:center;padding:1px;
+  /* 左上の番号バッジぶんの高さを上側だけあらかじめ確保しておく。
+     氏名は席の幅いっぱいまで大きくするため、確保しておかないと
+     常にバッジと重なりかけてしまい、fitSeatNames()の縮小回数が
+     席の大きさ（画面編集か印刷か）によって変わってしまう。 */
+  padding-top:calc(var(--fs-sub,8px)*1.8 + 2px);
   transition:.1s;width:var(--cw);height:var(--ch);
 }
 .seat .sname{font-weight:700;font-size:var(--fs-name,14px);line-height:1.15;letter-spacing:-.01em;
   white-space:nowrap;overflow:hidden;max-width:100%;display:inline-block}
 .seat .sromaji{font-family:var(--mono);font-size:var(--fs-sub,8px);color:#555;letter-spacing:.04em;margin-top:1px;
   white-space:nowrap;overflow:hidden;max-width:100%;display:inline-block}
-.seat .sno{position:absolute;top:1px;left:3px;font-family:var(--mono);font-size:var(--fs-sub,8px);color:#888}
+/* top/leftをpx固定にすると、席の大きさが違う画面編集と印刷とで相対位置がずれ、
+   氏名との重なり具合（＝fitSeatNames()の縮小回数）が変わってしまうため%指定にする */
+.seat .sno{position:absolute;top:2%;left:3%;font-family:var(--mono);font-size:var(--fs-sub,8px);color:#888}
 .seat.empty{border-style:dashed;border-color:#b9c2d2;background:#fdfdfe}
 .seat.off{border:1px dashed #dde2ea;background:repeating-linear-gradient(45deg,#f2f4f8,#f2f4f8 4px,#e9edf3 4px,#e9edf3 8px)}
 .seat.off *{display:none}
@@ -2620,43 +2627,59 @@ function fitSheet(){
    4文字以下の氏名はすべて同じ基準サイズ（4文字より大きくはしない）、
    4文字より長い氏名は実際の文字数に合わせてさらに縮小し、折り返さず1行に収める。 */
 function fitSeatNames(){
+  // スタイルの書き込みと読み取り（scrollWidthなど）を席ごとに交互に行うと、
+  // 座席数が多いとき（1クラス40席規模）ブラウザが強制的な再計算を
+  // 座席の数だけ繰り返すことになり遅くなる（レイアウト・スラッシング）。
+  // 「まず書き込みをまとめる→まとめて読み取る→また書き込みをまとめる」の
+  // 3段階に分けることで、強制的な再計算の回数を座席数に関わらず一定に近づける。
+  const REF=120;
+  const items=[];
   document.querySelectorAll(".seat:not(.off)").forEach(seat=>{
     const nameEl=seat.querySelector(".sname"), subEl=seat.querySelector(".sromaji");
-    const shrinkByWidth=n=>{
-      n.style.fontSize="";
-      const avail=seat.clientWidth-2, w=n.scrollWidth;
-      if(w>avail&&w>0){
-        const base=parseFloat(getComputedStyle(n).fontSize);
-        n.style.fontSize=(base*Math.max(0.45,avail/w))+"px";
-      }
-    };
-    if(subEl)shrinkByWidth(subEl);
-    if(!nameEl)return;
-    const text=nameEl.textContent||"";
-    if(!text.length)return;
+    if(subEl)subEl.style.fontSize="";
+    const text=nameEl?(nameEl.textContent||""):"";
+    if(nameEl&&text.length)nameEl.style.fontSize=REF+"px";
+    items.push({seat,nameEl,subEl,text});
+  });
+  items.forEach(it=>{
+    it.avail=Math.max(1,it.seat.clientWidth-2);
+    if(it.subEl)it.subW=it.subEl.scrollWidth;
+    if(it.nameEl&&it.text.length)it.perChar=it.nameEl.scrollWidth/it.text.length;
+  });
+  items.forEach(it=>{
+    if(it.subEl&&it.subW>it.avail&&it.subW>0){
+      const base=parseFloat(getComputedStyle(it.subEl).fontSize);
+      it.subEl.style.fontSize=(base*Math.max(0.45,it.avail/it.subW))+"px";
+    }
+    if(!it.nameEl||!it.text.length)return;
     // 大きめの基準フォントで実際の1文字あたりの幅を測り、そこから
     // 「席の余白を除いた幅に4文字がぴったり収まる大きさ」を逆算する
     // （文字幅はフォントサイズに比例するため、1回の計測で正確に求まる）。
-    const REF=120, avail=Math.max(1,seat.clientWidth-2);
-    nameEl.style.fontSize=REF+"px";
-    const perChar=nameEl.scrollWidth/text.length;
-    const base4=REF*avail/(perChar*4);
-    const font=text.length<=4?base4:base4*(4/text.length);
-    nameEl.style.fontSize=Math.max(4,font)+"px";
-    // 番号バッジ（左上・絶対配置）と実際に重なっていないかをDOM上で直接確認し、
-    // 重なっていればそれが解消するまで追加で縮める（席が小さく氏名が大きい場合の保険）。
-    const noEl=seat.querySelector(".sno");
-    if(noEl){
-      for(let i=0;i<4;i++){
-        const nr=nameEl.getBoundingClientRect(), nb=noEl.getBoundingClientRect();
-        const overlap=Math.max(0,Math.min(nr.right,nb.right)-Math.max(nr.left,nb.left))
-                     *Math.max(0,Math.min(nr.bottom,nb.bottom)-Math.max(nr.top,nb.top));
-        if(overlap<=0)break;
-        const cur=parseFloat(getComputedStyle(nameEl).fontSize);
-        nameEl.style.fontSize=(cur*0.85)+"px";
-      }
-    }
+    const base4=REF*it.avail/(it.perChar*4);
+    const font=it.text.length<=4?base4:base4*(4/it.text.length);
+    it.nameEl.style.fontSize=Math.max(4,font)+"px";
   });
+  // 番号バッジ（左上・絶対配置）と実際に重なっていないかをDOM上で直接確認し、
+  // 重なっていればそれが解消するまで追加で縮める（席が小さく氏名が大きい場合の保険。
+  // 通常は座席側にバッジぶんの余白を確保済みのため発生しない）。
+  for(let i=0;i<4;i++){
+    let any=false;
+    items.forEach(it=>{
+      if(!it.nameEl)return;
+      const noEl=it.seat.querySelector(".sno"); if(!noEl)return;
+      const nr=it.nameEl.getBoundingClientRect(), nb=noEl.getBoundingClientRect();
+      const overlap=Math.max(0,Math.min(nr.right,nb.right)-Math.max(nr.left,nb.left))
+                   *Math.max(0,Math.min(nr.bottom,nb.bottom)-Math.max(nr.top,nb.top));
+      it.overlap=overlap>0;
+      if(overlap>0)any=true;
+    });
+    if(!any)break;
+    items.forEach(it=>{
+      if(!it.overlap)return;
+      const cur=parseFloat(getComputedStyle(it.nameEl).fontSize);
+      it.nameEl.style.fontSize=(cur*0.85)+"px";
+    });
+  }
 }
 window.addEventListener("resize",()=>{if(R.view==="edit")fitSheet()});
 
