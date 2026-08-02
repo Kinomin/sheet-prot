@@ -220,7 +220,7 @@ table.tbl tr:hover td{background:#f8fafd}
 .seat{
   border:1.5px solid var(--ink);border-radius:4px;background:#fff;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
-  position:relative;overflow:hidden;text-align:center;padding:2px;
+  position:relative;overflow:hidden;text-align:center;padding:1px;
   transition:.1s;width:var(--cw);height:var(--ch);
 }
 .seat .sname{font-weight:700;font-size:var(--fs-name,14px);line-height:1.15;letter-spacing:-.01em;
@@ -2596,11 +2596,10 @@ function fitSheet(){
   sheet.style.setProperty("--cw",cw+"px");
   sheet.style.setProperty("--ch",ch+"px");
   sheet.style.setProperty("--gap",gap+"px");
-  // 印刷時は氏名（漢字）をできるだけ大きくする。折り返さない1行のままなので、
-  // 長い氏名は fitSeatNames() が席の幅に合わせて自動で縮小する。
-  // 上限は席の高さ（ch）にも連動させ、席が大きいほど氏名も大きくできるようにする。
-  const nameRatio=FIT.print?0.34:0.235, nameCap=FIT.print?Math.max(26,ch*0.55):26;
-  sheet.style.setProperty("--fs-name",Math.max(5,Math.min(cw*nameRatio,nameCap))+"px");
+  // 実際の氏名フォントサイズは fitSeatNames() が座席ごとに計算し直す
+  // （漢字4文字を基準に、席の実スペースから逆算する）。ここでは
+  // JS計算前の初期表示がおかしくならないよう、簡易な初期値だけ設定しておく。
+  sheet.style.setProperty("--fs-name",Math.max(5,Math.min(cw*0.235,26))+"px");
   sheet.style.setProperty("--fs-sub",Math.max(4,Math.min(cw*0.115,12))+"px");
   sheet.style.setProperty("--fs-room",Math.max(5,Math.min(cw*0.17,15))+"px");
   const grid=sheet.querySelector(".seatgrid");
@@ -2615,14 +2614,17 @@ function fitSheet(){
   avoidRoomOverlaps();
 }
 
-/* 氏名・ローマ字が座席内に収まるよう自動縮小する。どちらも折り返さない1行のまま、
-   席の幅を超えないぎりぎりの大きさまで縮める（＝できるだけ大きく表示する）。 */
+/* 氏名・ローマ字が座席内に収まるよう自動縮小する（画面編集・印刷とも共通）。
+   氏名は「漢字4文字」を基準の大きさとする——列数などから決め打ちの倍率で
+   決めるのではなく、その席の実際の横幅から「4文字ならこの大きさ」を逆算する。
+   4文字以下の氏名はすべて同じ基準サイズ（4文字より大きくはしない）、
+   4文字より長い氏名は実際の文字数に合わせてさらに縮小し、折り返さず1行に収める。 */
 function fitSeatNames(){
   document.querySelectorAll(".seat:not(.off)").forEach(seat=>{
     const nameEl=seat.querySelector(".sname"), subEl=seat.querySelector(".sromaji");
     const shrinkByWidth=n=>{
       n.style.fontSize="";
-      const avail=seat.clientWidth-4, w=n.scrollWidth;
+      const avail=seat.clientWidth-2, w=n.scrollWidth;
       if(w>avail&&w>0){
         const base=parseFloat(getComputedStyle(n).fontSize);
         n.style.fontSize=(base*Math.max(0.45,avail/w))+"px";
@@ -2630,7 +2632,17 @@ function fitSeatNames(){
     };
     if(subEl)shrinkByWidth(subEl);
     if(!nameEl)return;
-    shrinkByWidth(nameEl);
+    const text=nameEl.textContent||"";
+    if(!text.length)return;
+    // 大きめの基準フォントで実際の1文字あたりの幅を測り、そこから
+    // 「席の余白を除いた幅に4文字がぴったり収まる大きさ」を逆算する
+    // （文字幅はフォントサイズに比例するため、1回の計測で正確に求まる）。
+    const REF=120, avail=Math.max(1,seat.clientWidth-2);
+    nameEl.style.fontSize=REF+"px";
+    const perChar=nameEl.scrollWidth/text.length;
+    const base4=REF*avail/(perChar*4);
+    const font=text.length<=4?base4:base4*(4/text.length);
+    nameEl.style.fontSize=Math.max(4,font)+"px";
     // 番号バッジ（左上・絶対配置）と実際に重なっていないかをDOM上で直接確認し、
     // 重なっていればそれが解消するまで追加で縮める（席が小さく氏名が大きい場合の保険）。
     const noEl=seat.querySelector(".sno");
