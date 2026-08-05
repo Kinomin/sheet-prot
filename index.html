@@ -480,6 +480,12 @@ table.tbl tr:hover td{background:#f8fafd}
    氏名や教室備品の重なり判定を誤ることがあるため、印刷時は瞬時に切り替える。 */
 .print-preview .seat{transition:none}
 @media print{ .seat{transition:none} }
+/* 用紙・座席の寸法を組み直している最中は、席の拡縮アニメーションを止める。
+   アニメの途中の幅を測ってしまうと、そのときの大きさを基準に氏名の文字サイズが
+   決まってしまい、印刷サイズから画面サイズへ戻したときに氏名だけ大きいまま
+   取り残される（印刷・プレビューのあとに文字が巨大化して見える原因）。
+   上の2行は印刷へ「入る」ときの対策で、こちらは向きを問わず効かせる。 */
+.sheet.fitting .seat,.sheet.fitting .ritem{transition:none}
 </style>
 </head>
 <body>
@@ -2652,6 +2658,10 @@ function fitSheet(){
     const availH=pad.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
     sh=Math.min(availH,availW/ar); sw=sh*ar;
   }
+  // 寸法を測りながら組み直すあいだは席の拡縮アニメーションを止める（.fitting）。
+  // これがないと、印刷サイズから画面サイズへ戻した直後に、まだアニメーション中の
+  // 大きい幅を測ってしまい、氏名の文字だけ大きいまま取り残される。
+  sheet.classList.add("fitting");
   sheet.style.width=sw+"px"; sheet.style.height=sh+"px";
   const padPx=sw*0.032;
   sheet.style.setProperty("--pad",padPx+"px");
@@ -2680,8 +2690,11 @@ function fitSheet(){
     grid.style.top=(teacher?0:roomH*0.20)+"px";
     grid.style.bottom=(teacher?roomH*0.20:0)+"px";
   }
+  // 新しい寸法をこの場で確定させてから測る（アニメーションは.fittingで止めてある）
+  void sheet.offsetWidth;
   fitSeatNames();
   avoidRoomOverlaps();
+  sheet.classList.remove("fitting");
 }
 
 /* 「漢字4文字ぶんの幅 ÷ フォントサイズ」を実測して返す。
@@ -2710,6 +2723,7 @@ function cjk4Ratio(){
    決めるのではなく、その席の実際の横幅から「4文字ならこの大きさ」を逆算する。
    4文字以下の氏名はすべて同じ基準サイズ（4文字より大きくはしない）、
    4文字より長い氏名は実際の文字数に合わせてさらに縮小し、折り返さず1行に収める。 */
+let _fitNamesRetry=0;
 function fitSeatNames(){
   // スタイルの書き込みと読み取り（scrollWidthなど）を席ごとに交互に行うと、
   // 座席数が多いとき（1クラス40席規模）ブラウザが強制的な再計算を
@@ -2717,8 +2731,20 @@ function fitSeatNames(){
   // 「まず書き込みをまとめる→まとめて読み取る→また書き込みをまとめる」の
   // 3段階に分けることで、強制的な再計算の回数を座席数に関わらず一定に近づける。
   const REF=120;
+  const seats=[...document.querySelectorAll(".seat:not(.off)")];
+  if(!seats.length){_fitNamesRetry=0;return}
+  /* この関数は測定用にいったん特大（REF px）の文字を席へ書き込む。
+     席の幅がまだ測れない状態（印刷直後でレイアウトが確定していない、
+     プレビューから戻した直後など）で先へ進むと、測った幅が0になって
+     本来の大きさへ戻せず、その特大の文字が残ったまま画面に出てしまう。
+     測れないうちは一切書き換えず、レイアウトが決まるのを待ってやり直す。 */
+  if(!seats.some(s=>s.clientWidth>0)){
+    if(_fitNamesRetry++<30)requestAnimationFrame(fitSeatNames);
+    return;
+  }
+  _fitNamesRetry=0;
   const items=[];
-  document.querySelectorAll(".seat:not(.off)").forEach(seat=>{
+  seats.forEach(seat=>{
     const nameEl=seat.querySelector(".sname"), subEl=seat.querySelector(".sromaji");
     if(subEl)subEl.style.fontSize="";
     const text=nameEl?(nameEl.textContent||""):"";
@@ -2736,7 +2762,11 @@ function fitSeatNames(){
       const base=parseFloat(getComputedStyle(it.subEl).fontSize);
       it.subEl.style.fontSize=(base*Math.max(0.45,it.avail/it.subW))+"px";
     }
-    if(!it.nameEl||!it.text.length||!it.nameW)return;
+    if(!it.nameEl||!it.text.length)return;
+    // 幅を測れなかった席は、測定用に入れた特大の文字をそのまま残さず、
+    // CSSの既定値（--fs-name）へ必ず戻す。ここで戻し忘れると、その席だけ
+    // 氏名が巨大なまま画面に残ってしまう。
+    if(!it.nameW){it.nameEl.style.fontSize="";return}
     // 基準：漢字4文字が席の幅にちょうど収まる大きさ。1〜3文字でもこれ以上は大きくしない。
     // 実際の氏名がこの幅を超える場合だけ、席の幅に収まるところまで縮める。
     const base4=ratio>0?it.avail/ratio:Infinity;
@@ -3487,7 +3517,10 @@ function doPrint(){
   FIT.print=true;fitSheet();
   setTimeout(()=>{window.print();FIT.print=false;requestAnimationFrame(fitSheet)},60);
 }
-window.addEventListener("afterprint",()=>{FIT.print=false;fitSheet()});
+/* 印刷ダイアログを閉じた直後は、まだ印刷用のレイアウトから戻りきっていないことがある。
+   その場でfitSheet()を走らせると席の幅を測れず氏名の大きさを決められないため、
+   次の描画フレームまで待ってから画面用のサイズへ組み直す。 */
+window.addEventListener("afterprint",()=>{FIT.print=false;requestAnimationFrame(fitSheet)});
 
 /* =====================================================================
    ルート描画
