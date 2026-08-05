@@ -1,0 +1,77 @@
+name: Keep Supabase Awake
+
+# Supabaseの無料プランは、一定期間データベースへのアクセスが無いとプロジェクトが
+# 一時停止（pause）され、再開するまでログイン・同期・問い合わせが使えなくなる。
+# それを避けるため、定期的に本物のデータベース問い合わせを1回だけ投げて起こしておく。
+#
+# ＜時刻について＞
+# GitHub Actionsのcronは常にUTCで動く。日本時間(JST=UTC+9)の水曜10:00は
+# UTCでは水曜01:00にあたるため `0 1 * * 3` と書く。
+#
+# ＜日曜も動かしている理由＞
+# 無料プランの停止までの猶予は7日で、水曜だけだと間隔がちょうど7日となり余裕がない。
+# GitHubのcronは混雑時に数十分〜数時間遅れたり、まれに実行そのものが飛ぶことがあるため、
+# 1回失敗しただけで停止してしまう。間に日曜を挟んで最大でも4日間隔に抑えている。
+# 水曜だけで十分という判断であれば、下の `0 1 * * 0` の行を消せばよい。
+on:
+  schedule:
+    - cron: "0 1 * * 3"   # 毎週水曜 10:00 JST（= 01:00 UTC）
+    - cron: "0 1 * * 0"   # 毎週日曜 10:00 JST（予備。間隔を7日未満に保つため）
+  workflow_dispatch: {}   # 手動でも実行できる（動作確認用）
+
+# 同時に走っても意味がないので、後から始まったものだけを残す
+concurrency:
+  group: keep-supabase-awake
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # 接続先はindex.htmlに書いてある公開値（URLとanonキー）をそのまま使う。
+      # ここに値を二重管理すると、接続先を変えたときに片方だけ古くなって
+      # 「動いているつもりで実は別プロジェクトを叩いていた」という事故になる。
+      - name: Read Supabase URL and anon key from index.html
+        id: cfg
+        run: |
+          set -euo pipefail
+          url=$(grep -oP 'supabaseUrl:"\K[^"]+' index.html | head -1)
+          key=$(grep -oP 'supabaseAnonKey:"\K[^"]+' index.html | head -1)
+          if [ -z "$url" ] || [ -z "$key" ]; then
+            echo "::error::index.html から supabaseUrl / supabaseAnonKey を読み取れませんでした"
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          # anonキーは公開値だがログに全文を残す必要はないので、maskして値だけ渡す
+          echo "::add-mask::$key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "接続先: $url"
+
+      # PostgRESTへの問い合わせは実際にPostgresへSQLを発行するため、
+      # 「データベースへのアクセス」として扱われる（RLSで0件が返ってきても構わない）。
+      # 一時的な不調で止まってしまわないよう、間隔を空けて3回まで試す。
+      - name: Ping database
+        env:
+          URL: ${{ steps.cfg.outputs.url }}
+          KEY: ${{ steps.cfg.outputs.key }}
+        run: |
+          set -uo pipefail
+          for i in 1 2 3; do
+            code=$(curl -s -o /tmp/body.txt -w '%{http_code}' --max-time 30 \
+              -H "apikey: $KEY" \
+              -H "Authorization: Bearer $KEY" \
+              "$URL/rest/v1/profiles?select=id&limit=1" || echo 000)
+            echo "$i回目: HTTP $code"
+            # 2xxなら成功。RLSで行が返らなくても200が返る。
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+              echo "Supabaseへの問い合わせに成功しました（プロジェクトは稼働中）"
+              exit 0
+            fi
+            echo "応答: $(head -c 300 /tmp/body.txt 2>/dev/null || true)"
+            [ "$i" -lt 3 ] && sleep 20
+          done
+          echo "::error::Supabaseへ3回とも到達できませんでした。プロジェクトが停止しているか、URL/anonキーが変わっている可能性があります。"
+          exit 1
