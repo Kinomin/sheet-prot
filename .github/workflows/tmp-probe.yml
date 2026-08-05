@@ -1,0 +1,29 @@
+name: TMP probe (delete me)
+on:
+  workflow_dispatch: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe candidate endpoints
+        run: |
+          set -uo pipefail
+          URL=$(grep -oP 'supabaseUrl:"\K[^"]+' index.html | head -1)
+          KEY=$(grep -oP 'supabaseAnonKey:"\K[^"]+' index.html | head -1)
+          probe(){
+            local desc="$1"; shift
+            code=$(curl -s -o /tmp/b.txt -w '%{http_code}' --max-time 25 "$@" || echo 000)
+            echo "--------------------------------------------"
+            echo "[$desc] HTTP $code"
+            echo "body: $(head -c 220 /tmp/b.txt 2>/dev/null)"
+          }
+          probe "GET /rest/v1/ (OpenAPI)" -H "apikey: $KEY" "$URL/rest/v1/"
+          probe "POST rpc/free_print_limit" -X POST -H "apikey: $KEY" \
+                -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+                -d '{}' "$URL/rest/v1/rpc/free_print_limit"
+          probe "GET /auth/v1/health" -H "apikey: $KEY" "$URL/auth/v1/health"
+          probe "GET /rest/v1/profiles" -H "apikey: $KEY" \
+                -H "Authorization: Bearer $KEY" "$URL/rest/v1/profiles?select=id&limit=1"
+          echo "--------------------------------------------"
