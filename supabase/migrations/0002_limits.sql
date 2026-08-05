@@ -21,6 +21,18 @@ comment on column public.profiles.print_count is '無料会員の印刷回数。
 create or replace function public.free_print_limit()
 returns integer language sql immutable as $$ select 3 $$;
 
+-- この関数は定数を返すだけで、会員情報にも生徒の情報にも触れないため、
+-- 誰が呼んでも差し支えない（下のconsume_print等とは違いrevokeしない）。
+--
+-- ★この権限には依存関係がある★
+-- Supabaseの無料プランは一定期間アクセスが無いとプロジェクトが一時停止される。
+-- それを防ぐ .github/workflows/keep-supabase-awake.yml が、anonキーで
+-- この関数を定期的に呼んでデータベースを起こしている。
+-- Postgresは新しい関数のexecuteを既定でpublicへ付与するため今も呼べているが、
+-- 既定任せだと意図せず失われるので、明示的に付与しておく。
+-- ここを revoke すると定期アクセスが失敗し、やがてプロジェクトが停止する。
+grant execute on function public.free_print_limit() to anon, authenticated;
+
 -- -------------------------------------------------------------
 -- 印刷を1回消費する。
 -- security definer なので profiles を直接更新できるが、
