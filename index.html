@@ -1382,12 +1382,26 @@ function go(patch){
 }
 /* boot()の最後（ログイン処理でのURL書き換えがすべて終わったあと）に一度だけ呼ぶ。
    ここでpopstateを拾って、戻る/進むのたびにRへ復元してから再描画する。 */
+/* 画面の上に重ねて出しているもの（印刷プレビュー・モーダル）を、開いていれば
+   いちばん上のものだけ閉じる。閉じたらtrueを返す。
+   印刷プレビューは #layer ではなく body 直下に置き、座席表のDOMそのものを
+   中へ move して見せているため、closeModal()では閉じられない。専用の後片付け
+   （dlgPrintPreviewのcancel）を通さないと座席表が画面から消えてしまう。 */
+function closeTopOverlay(){
+  if(CLOSE_PRINT_PREVIEW){CLOSE_PRINT_PREVIEW();return true}
+  if($("#layer").children.length){closeModal();return true}
+  return false;
+}
 function initRouter(){
   history.replaceState({...R},"");
   window.addEventListener("popstate",e=>{
+    /* 重ねて出しているものがあるときの「戻る」は、画面遷移ではなく
+       「それを閉じる」操作として扱う（スマホの戻るボタンの一般的な挙動）。
+       ここで閉じずに画面だけ切り替えると、印刷プレビューが上に残ったまま
+       操作できなくなる。閉じたあとは同じ画面に留めるため履歴を積み直す。 */
+    if(closeTopOverlay()){history.pushState({...R},"");return}
     if(!e.state)return;                 // 履歴の外（アプリ起動前）まで戻った場合はブラウザに任せる
     Object.assign(R,e.state);
-    closeModal();
     render();
   });
 }
@@ -2300,7 +2314,21 @@ function paneLayout(t){
       const s=at(r,c);
       g.append(el("button",{class:"lay-seat"+(s.enabled?"":" off"),
         title:s.enabled?"クリックで削除（位置は維持）":"クリックで復元",
-        onclick:()=>{s.enabled=!s.enabled;rerender()}},`${r+1}-${c+1}`));
+        onclick:()=>{
+          s.enabled=!s.enabled;
+          // 削除した席に固定されている生徒がいたら、その固定も一緒に解除する。
+          // 残したままだと「固定席・NGペア」に無い席の固定が並び続けるうえ、
+          // 座席表を開くたびに画面へ出ない席へその生徒が配置され、
+          // 名前カードからも消えて行方不明になってしまう。
+          if(!s.enabled){
+            const f=(t.fixedSeats||[]).find(x=>x.seatId===s.id);
+            if(f){
+              setFixedEverywhere(t,s.id,f.no,false);
+              toast(`この席に固定していた${t.roster.find(r=>r.no===f.no)?.name??"生徒"}さんの固定も解除しました`);
+            }
+          }
+          rerender();
+        }},`${r+1}-${c+1}`));
     }
   }
   g.append(el("div"));
@@ -2359,6 +2387,20 @@ function setFixedEverywhere(t,seatId,no,fixed){
     }
   });
 }
+/* NGペアも固定席とまったく同じ持ち方をしている（テンプレートt.ngPairsと、
+   座席表ごとのスナップショットc.ngPairsの2か所）。そしてsolve()は
+   `c.ngPairs||t.ngPairs` の順で見るため、テンプレート側だけ書き換えると
+   すでに作成済みの座席表ではNGペアが黙って無視され、
+   「登録したのに隣同士になる」状態になる。固定席と同様に両方へ反映する。 */
+function setNgPairEverywhere(t,a,b,add){
+  const drop=arr=>(arr||[]).filter(p=>!(p.includes(a)&&p.includes(b)));
+  t.ngPairs=drop(t.ngPairs);
+  if(add)t.ngPairs.push([a,b]);
+  (t.charts||[]).forEach(c=>{
+    c.ngPairs=drop(c.ngPairs);
+    if(add)c.ngPairs.push([a,b]);
+  });
+}
 function paneRules(t){
   const seatLabel=id=>{const s=t.layout.seats.find(x=>x.id===id);
     return s?`前から${s.row+1}列目・${s.col+1}番`:"—"};
@@ -2386,7 +2428,7 @@ function paneRules(t){
       el("b",{text:nameOf(p[0])}),el("span",{style:{color:"var(--ink3)"},text:"－"}),el("b",{text:nameOf(p[1])}),
       el("span",{style:{flex:"1"}}),
       el("button",{class:"btn btn-sm btn-danger",onclick:()=>{
-        t.ngPairs=t.ngPairs.filter(x=>x!==p);store.save(t);drawNg()}},"解除"))));
+        setNgPairEverywhere(t,p[0],p[1],false);store.save(t);drawNg()}},"解除"))));
   };drawNg();
 
   const stuOpts=()=>t.roster.map(s=>el("option",{value:s.no},`${s.no}. ${s.name}`));
@@ -2447,7 +2489,7 @@ function paneRules(t){
           if(t.roster.length<2)return toast("先に「名簿管理」で生徒を2名以上登録してください");
           if(a===b)return toast("同じ生徒は登録できません");
           if(t.ngPairs.some(p=>p.includes(a)&&p.includes(b)))return toast("すでに登録されています");
-          t.ngPairs.push([a,b]);store.save(t);drawNg();toast("NGペアを登録しました");
+          setNgPairEverywhere(t,a,b,true);store.save(t);drawNg();toast("NGペアを登録しました");
         }},"登録する")),
       ngList));
 }
@@ -2609,6 +2651,11 @@ function viewEditor(){
 function reconcileFixedSeats(c){
   let changed=false;
   (c.fixedSeats||[]).forEach(f=>{
+    // 存在しない席・削除された席へは配置しない。
+    // ここで書き込んでしまうと、画面のどこにも出ないのに「配置済み」と数えられ、
+    // その生徒が名前カード一覧からも消えて行方不明になる。
+    const seat=c.layout.seats.find(s=>s.id===f.seatId);
+    if(!seat||!seat.enabled)return;
     if(c.assign[f.seatId]===f.no)return;
     for(const[sid,n2]of Object.entries(c.assign))if(n2===f.no)delete c.assign[sid];
     c.assign[f.seatId]=f.no;changed=true;
@@ -3337,6 +3384,10 @@ function solve(t,c,opt){
    印刷
    ===================================================================== */
 let PRINT_PREVIEW_OPEN=false;
+/* プレビューを外側から閉じるための後始末。開いているあいだだけ関数が入る。
+   ブラウザの「戻る」を押されたときなど、dlgPrintPreviewの外から
+   正しい手順で閉じる必要があるため保持する。 */
+let CLOSE_PRINT_PREVIEW=null;
 
 /* 印刷ボタン／Ctrl+P の入口。実物の.sheet要素を画面中央のオーバーレイへ一時的に
    移動してプレビュー表示し、「はい、印刷する」を押したときだけ実際に印刷する。 */
@@ -3416,18 +3467,25 @@ function dlgPrintPreview(){
 
   function onKey(e){ if(e.key==="Escape")cancel(); }
   document.addEventListener("keydown",onKey);
+  CLOSE_PRINT_PREVIEW=cancel;   // ブラウザの「戻る」など、外側から閉じられるようにする
 
   function teardown(){
     sheetEl.style.transform=""; sheetEl.style.marginBottom="";
-    if(homeNext)homeParent.insertBefore(sheetEl,homeNext); else homeParent.append(sheetEl);
+    // プレビュー表示中に画面が作り直された場合、元の置き場所はもう文書から外れている。
+    // そこへ挿し戻すと座席表がどこにも表示されなくなるため、作り直しに任せる。
+    if(homeParent.isConnected){
+      if(homeNext)homeParent.insertBefore(sheetEl,homeNext); else homeParent.append(sheetEl);
+    }
     backdrop.remove();
     document.removeEventListener("keydown",onKey);
     PRINT_PREVIEW_OPEN=false;
+    CLOSE_PRINT_PREVIEW=null;
   }
   function cancel(){
+    const stale=!homeParent.isConnected;
     teardown();
     FIT.print=false;
-    requestAnimationFrame(fitSheet);
+    if(stale)render(); else requestAnimationFrame(fitSheet);
   }
   async function confirmPrint(btn){
     btn.disabled=true;
